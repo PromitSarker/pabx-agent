@@ -40,10 +40,8 @@ function Sidebar({ activeTab, setActiveTab }) {
   return (
     <div className="sidebar">
       <div className="brand">
-        <div className="brand-icon">
-          <Database size={28} />
-        </div>
-        <span className="brand-text">RT Admin</span>
+        <img src="/logo.png" alt="Babuland Logo" className="brand-logo" />
+        <span className="brand-text">Admin</span>
       </div>
       <div className="nav-menu">
         {navItems.map((item) => (

@@ -1,7 +1,7 @@
 :root {
-  --primary-blue: #1D7BBF;
-  --primary-purple: #662D91;
-  --primary-hover: #165A8F;
+  --primary-color: #F25A41;
+  --secondary-color: #FF8807;
+  --primary-hover: #D9442B;
   
   --bg-main: #f8fafc;
   --bg-sidebar: #ffffff;
@@ -9,16 +9,16 @@
   --bg-card-hover: #f1f5f9;
   
   --glass-border: rgba(226, 232, 240, 0.8);
-  --glass-glow: rgba(29, 123, 191, 0.1);
+  --glass-glow: rgba(242, 90, 65, 0.1);
   
-  --text-main: #0f172a;
+  --text-main: #03030F;
   --text-muted: #64748b;
   --danger: #ef4444;
   --success: #10b981;
-  --accent-gradient: linear-gradient(135deg, var(--primary-blue), var(--primary-purple));
+  --accent-gradient: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
   
-  --shadow-sm: 0 4px 6px -1px rgba(29, 123, 191, 0.05), 0 2px 4px -1px rgba(29, 123, 191, 0.03);
-  --shadow-md: 0 10px 15px -3px rgba(29, 123, 191, 0.08), 0 4px 6px -2px rgba(29, 123, 191, 0.04);
+  --shadow-sm: 0 4px 6px -1px rgba(242, 90, 65, 0.05), 0 2px 4px -1px rgba(242, 90, 65, 0.03);
+  --shadow-md: 0 10px 15px -3px rgba(242, 90, 65, 0.08), 0 4px 6px -2px rgba(242, 90, 65, 0.04);
 }
 
 * {
@@ -78,7 +78,7 @@ body {
   font-weight: 700;
   font-size: 1.25rem;
   letter-spacing: -0.02em;
-  color: var(--primary-blue);
+  color: var(--primary-color);
 }
 
 .brand-logo {
@@ -112,7 +112,7 @@ body {
 
 .nav-item:hover {
   background: var(--bg-card-hover);
-  color: var(--primary-blue);
+  color: var(--primary-color);
   transform: translateX(4px);
 }
 
@@ -186,8 +186,8 @@ body {
   width: 56px;
   height: 56px;
   border-radius: 16px;
-  background: rgba(102, 45, 145, 0.08);
-  color: var(--primary-purple);
+  background: rgba(255, 136, 7, 0.08);
+  color: var(--secondary-color);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -203,7 +203,7 @@ body {
 .stat-value {
   font-size: 1.75rem;
   font-weight: 700;
-  color: var(--primary-blue);
+  color: var(--primary-color);
 }
 
 /* Tables */
@@ -258,9 +258,9 @@ tbody tr:hover {
 }
 
 .badge.primary {
-  background: rgba(29, 123, 191, 0.1);
-  color: var(--primary-blue);
-  border: 1px solid rgba(29, 123, 191, 0.2);
+  background: rgba(242, 90, 65, 0.1);
+  color: var(--primary-color);
+  border: 1px solid rgba(242, 90, 65, 0.2);
 }
 
 /* Forms & Inputs */
@@ -289,8 +289,8 @@ tbody tr:hover {
 
 .input-field:focus {
   outline: none;
-  border-color: var(--primary-blue);
-  box-shadow: 0 0 0 3px rgba(29, 123, 191, 0.1);
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(242, 90, 65, 0.1);
 }
 
 .input-field::placeholder {
@@ -341,8 +341,8 @@ textarea.input-field {
 
 .btn-outline:hover:not(:disabled) {
   background: var(--bg-card-hover);
-  color: var(--primary-blue);
-  border-color: rgba(29, 123, 191, 0.3);
+  color: var(--primary-color);
+  border-color: rgba(242, 90, 65, 0.3);
 }
 
 .btn-danger {
@@ -398,7 +398,7 @@ textarea.input-field {
 }
 
 .modal-close:hover {
-  color: var(--primary-blue);
+  color: var(--primary-color);
   background: var(--bg-card-hover);
 }
 
@@ -420,7 +420,7 @@ textarea.input-field {
 }
 
 .summary-content strong {
-  color: var(--primary-blue);
+  color: var(--primary-color);
 }
 
 /* Loading animations */

@@ -96,7 +96,7 @@ export const CaptchaGate = ({ onSolved }) => {
         }}
       >
         <img src="/logo.png" alt="Logo" style={{ maxHeight: '40px', maxWidth: '100%', height: 'auto', marginBottom: '20px', objectFit: 'contain' }} />
-        <h2 style={{ margin: '0 0 10px 0', fontSize: '1.5rem', color: '#0f172a' }}>Security Check</h2>
+        <h2 style={{ margin: '0 0 10px 0', fontSize: '1.5rem', color: '#03030F' }}>Security Check</h2>
         <p style={{ margin: '0 0 20px 0', color: '#64748b' }}>Please solve this CAPTCHA to verify you are human.</p>
         
         <canvas 
@@ -124,7 +124,7 @@ export const CaptchaGate = ({ onSolved }) => {
           <button 
             type="submit"
             style={{
-              padding: '12px', borderRadius: '8px', border: 'none', background: '#0f172a', color: 'white', fontSize: '1rem', cursor: 'pointer', fontWeight: '500', marginTop: '10px'
+              padding: '12px', borderRadius: '8px', border: 'none', background: '#03030F', color: 'white', fontSize: '1rem', cursor: 'pointer', fontWeight: '500', marginTop: '10px'
             }}
           >
             Verify

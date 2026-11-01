@@ -731,7 +731,7 @@ function App() {
                 borderRadius: '50%',
                 background: isVoiceThinking ? 'linear-gradient(135deg, #10b981, #3b82f6)' : 'var(--brand-gradient)',
                 color: 'white', display: 'flex', justifyContent: 'center', alignItems: 'center',
-                boxShadow: isVoiceThinking ? '0 0 35px rgba(16, 185, 129, 0.6)' : '0 0 25px rgba(102, 45, 145, 0.4)',
+                boxShadow: isVoiceThinking ? '0 0 35px rgba(16, 185, 129, 0.6)' : '0 0 25px rgba(255, 136, 7, 0.4)',
                 marginBottom: isInputFocused ? '4px' : '10px',
                 transition: 'width 0.3s ease, height 0.3s ease, margin-bottom 0.3s ease'
               }}

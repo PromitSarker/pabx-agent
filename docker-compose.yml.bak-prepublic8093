@@ -1,0 +1,86 @@
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: babuland
+      MYSQL_USER: babuland
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build: .
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./data:/app/data
+      - ./chroma_db:/app/chroma_db
+      - ./uploads:/app/uploads
+    env_file:
+      - .env # This will load GEMINI_API_KEY, DATABASE_URL, etc.
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3004:3004"
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  admin-frontend:
+    build: ./admin-frontend
+    ports:
+      - "3006:3006"
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  # --- Outbound SIP calling (ADN Telecom trunk) ---
+  asterisk:
+    build: ./sip
+    network_mode: host          # SIP + RTP need real UDP ports; bound to :${SIP_LOCAL_PORT:-5062} and RTP ${SIP_RTP_START:-10000}-${SIP_RTP_END:-10400}
+    environment:
+      SIP_USER: ${SIP_USER}
+      SIP_PASSWORD: ${SIP_PASSWORD}
+      SIP_HOST: ${SIP_HOST:-103.251.120.244}
+      SIP_PORT: ${SIP_PORT:-5060}
+      SIP_LOCAL_PORT: ${SIP_LOCAL_PORT:-5062}
+      SIP_RTP_START: ${SIP_RTP_START:-10000}
+      SIP_RTP_END: ${SIP_RTP_END:-10400}
+      SIP_MAX_CALL_SECONDS: ${SIP_MAX_CALL_SECONDS:-300}
+    volumes:
+      - sip_spool:/var/spool/asterisk
+    restart: unless-stopped
+
+  sip-bridge:
+    build: .
+    command: ["uvicorn", "sipbridge.app:app", "--host", "0.0.0.0", "--port", "8093", "--workers", "1"]
+    ports:
+      - "127.0.0.1:8092:8092"   # AudioSocket (Asterisk -> bridge)
+      - "127.0.0.1:8093:8093"   # control API (POST /call), token protected, local only
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./chroma_db:/app/chroma_db
+      - sip_spool:/var/spool/asterisk
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
+  sip_spool:
