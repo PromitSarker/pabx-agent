@@ -2,7 +2,10 @@ from fastapi import FastAPI
 
 from api.routers.chat import router as chat_router
 from api.routers.documents import router as documents_router
-from api.routers.admin import router as admin_router
+from api.routers.admin import router as admin_router, public_router as admin_public_router
+from api.routers.billing import router as billing_router
+from api.auth import require_admin
+from fastapi import Depends
 from api.routers.upload import router as upload_router
 from api.routers.voice import router as voice_router
 from api.routers.voice_stream import router as voice_stream_router
@@ -15,9 +18,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 def create_app() -> FastAPI:
 	app = FastAPI(
-		title="Babuland API",
+		title="upay MTB Islamic DPS API",
 		version="1.0.0",
-		description="Minimal chat API backed by Babuland LangGraph agent.",
+		description="Minimal chat API backed by the upay LangGraph agent.",
 	)
 
 	allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "*")
@@ -32,8 +35,10 @@ def create_app() -> FastAPI:
 	)
 
 	app.include_router(chat_router, prefix="/api")
-	app.include_router(documents_router, prefix="/api")
+	app.include_router(documents_router, prefix="/api", dependencies=[Depends(require_admin)])  # knowledge-base management
+	app.include_router(admin_public_router, prefix="/api")
 	app.include_router(admin_router, prefix="/api")
+	app.include_router(billing_router, prefix="/api")
 	app.include_router(upload_router, prefix="/api")
 	app.include_router(voice_router, prefix="/api")
 	app.include_router(voice_stream_router, prefix="/api")

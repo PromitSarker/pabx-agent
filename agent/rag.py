@@ -73,6 +73,12 @@ def add_document(text: str, metadata: dict = None) -> list[str]:
 		separators=["\n\n", "\n", ". ", " ", ""]
 	)
 	chunks = text_splitter.split_text(text)
+	try:
+		from agent.usage import record_usage, estimate_tokens
+		record_usage(model="gemini-embedding-001", purpose="embed_ingest", channel="system", estimated=True,
+					 input_text=sum(estimate_tokens(c) for c in chunks))
+	except Exception as e:
+		print(f"[usage] embed_ingest not recorded: {e}")
 	
 	doc_ids = []
 	docs = []
@@ -106,6 +112,11 @@ def search_documents(query: str, k: int = 5) -> str:
 		return "Vector store is offline."
 	
 	print(f"[RAG Search] Query: '{query}', k={k}")
+	try:
+		from agent.usage import record_usage, estimate_tokens
+		record_usage(model="gemini-embedding-001", purpose="embed_query", estimated=True, input_text=estimate_tokens(query))
+	except Exception as e:
+		print(f"[usage] embed_query not recorded: {e}")
 	
 	# 1. Dense Retriever setup (using custom query embeddings)
 	query_embeddings = GoogleGenerativeAIEmbeddings(

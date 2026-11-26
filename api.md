@@ -1,8 +1,8 @@
-# Babuland API Contract
+# upay API Contract
 
 ## Purpose
 
-This document defines the HTTP contract for chat-based customer interactions on top of the LangGraph workflow in the Babuland agent.
+This document defines the HTTP contract for chat-based customer interactions on top of the LangGraph workflow in the upay agent.
 
 ## Architecture Context
 

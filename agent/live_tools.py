@@ -2,6 +2,7 @@ from agent.tools import (
 	escalate,
 	search_knowledge_base,
 	save_collected_information,
+	note_customer_query,
 	send_verification_email,
 	write_to_chat,
 	end_call
@@ -12,6 +13,7 @@ LIVE_TOOLS_MAP = {
 	"escalate": escalate.invoke,
 	"search_knowledge_base": search_knowledge_base.invoke,
 	"save_collected_information": save_collected_information.invoke,
+	"note_customer_query": note_customer_query.invoke,
 	"send_verification_email": send_verification_email.invoke,
 	"write_to_chat": write_to_chat.invoke,
 	"end_call": end_call.invoke,
@@ -21,7 +23,7 @@ LIVE_TOOLS_MAP = {
 LIVE_TOOL_DECLARATIONS = [
 	{
 		"name": "escalate",
-		"description": "Use this tool when the user has a complex request, complaint, or wants to talk to a human. It will signal the system to transfer the conversation to a human support agent.",
+		"description": "Use this tool when the user has a complaint or asks for a human. A customer service person will contact them later; no phone number is given.",
 		"parameters": {
 			"type": "OBJECT",
 			"properties": {
@@ -35,7 +37,7 @@ LIVE_TOOL_DECLARATIONS = [
 	},
 	{
 		"name": "search_knowledge_base",
-		"description": "Search the knowledge base for general information, policies, or FAQs. Use this when the user asks a general question about Babuland, its branches, opening hours, tickets, pricing, membership, parties, or pricing.",
+		"description": "Search the knowledge base about the MTB Islamic DPS on upay. Use this when the user asks about eligibility, plans, deposit amounts, tenure, profit, tax, withdrawal, early encashment, instalments, nominee or charges.",
 		"parameters": {
 			"type": "OBJECT",
 			"properties": {
@@ -49,16 +51,33 @@ LIVE_TOOL_DECLARATIONS = [
 	},
 	{
 		"name": "save_collected_information",
-		"description": "Save pieces of information gathered from the user (e.g., for IT services, lead gen, etc). Pass a dictionary mapping the exact requested keys to the user's provided values.",
+		"description": "Save details the user shares (Name, Mobile, Preferred Call Time, Interest) as {key: value}.",
 		"parameters": {
 			"type": "OBJECT",
 			"properties": {
 				"data": {
-					"type": "OBJECT",
-					"description": "A dictionary mapping the exact requested keys to the user's provided values."
+					"type": "OBJECT"
 				}
 			},
 			"required": ["data"]
+		}
+	},
+	{
+		"name": "note_customer_query",
+		"description": "Note a question you could not answer, a callback request (put the time in query) or a complaint, for customer service follow-up. One call per question.",
+		"parameters": {
+			"type": "OBJECT",
+			"properties": {
+				"query": {
+					"type": "STRING",
+					"description": "The customer's words, short."
+				},
+				"kind": {
+					"type": "STRING",
+					"description": "question | callback | complaint"
+				}
+			},
+			"required": ["query"]
 		}
 	},
 	{
@@ -91,10 +110,15 @@ LIVE_TOOL_DECLARATIONS = [
 	},
 	{
 		"name": "end_call",
-		"description": "End the current voice call. Use this when the conversation has naturally concluded or when the user explicitly asks to hang up or end the call. ALWAYS ask for confirmation before calling this tool.",
+		"description": "End the call, only after saying goodbye aloud. Always pass outcome.",
 		"parameters": {
 			"type": "OBJECT",
-			"properties": {}
+			"properties": {
+				"outcome": {
+					"type": "STRING",
+					"description": "interested | not_interested | call_later | do_not_call | wrong_number | answered_questions | no_response"
+				}
+			}
 		}
 	}
 ]

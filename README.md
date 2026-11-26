@@ -1,6 +1,6 @@
-# Babuland Agent Architecture
+# upay MTB Islamic DPS Agent Architecture
 
-This system is a message-only chat assistant for Babuland, an indoor playground chain for children in Bangladesh. FastAPI receives the message, LangGraph routes the request, Gemini LLM determines whether to search the knowledge base for FAQs, save collected information (lead generation), or escalate. MySQL stores conversations, collected data, session summaries, and user auth codes.
+This system is a chat, web-voice and outbound phone assistant for upay's MTB Islamic DPS savings scheme (knowledge source: `knowledge/upay_dps.md`, built from the public upay page by `fetch_upay_kb.py`). FastAPI receives the message, LangGraph routes the request, Gemini LLM determines whether to search the knowledge base for FAQs, save collected information (lead generation), or escalate. MySQL stores conversations, collected data, session summaries, and user auth codes.
 
 ## 1.1 System Overview
 

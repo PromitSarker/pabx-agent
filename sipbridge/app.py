@@ -18,7 +18,10 @@ from typing import Dict, Optional
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from fastapi.concurrency import run_in_threadpool
+from api import call_store
 from api.admin_store import admin_store
+from agent.usage import replay_spool
 from .session import CallSession, KIND_UUID, read_frame
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -32,8 +35,8 @@ MAX_CONCURRENT = int(os.getenv("SIP_MAX_CONCURRENT", "2"))
 RING_SECONDS = int(os.getenv("SIP_RING_SECONDS", "45"))
 SPOOL = "/var/spool/asterisk"
 DEFAULT_PURPOSE = os.getenv("SIP_DEFAULT_PURPOSE", (
-    "Follow up with a Babuland customer: ask whether they would like information about our play zones, "
-    "ticket prices, birthday parties or planning a visit, and answer their questions."))
+    "Introduce the MTB Islamic DPS (Shariah-compliant monthly savings scheme from Mutual Trust Bank, opened "
+    "in the upay app), explain briefly what it offers and why it can be useful, and answer their questions."))
 
 
 @dataclass
@@ -84,7 +87,7 @@ def active_calls() -> int:
 def write_call_file(info: CallInfo):
     body = "\n".join([
         f"Channel: PJSIP/{info.dialed}@adn",
-        f'CallerID: "Babuland" <{CALLER_ID}>',
+        f'CallerID: "upay" <{CALLER_ID}>',
         f"WaitTime: {RING_SECONDS}",
         "MaxRetries: 0",
         "Context: ai-bridge",
@@ -118,6 +121,10 @@ async def handle_audiosocket(reader, writer):
         writer.close()
         return
     info.status = "answered"
+    try:
+        await run_in_threadpool(call_store.mark_answered, call_id)
+    except Exception as e:
+        log.warning("call row not marked answered: %s", e)
     clog = logging.getLogger(f"call.{call_id[:8]}")
     clog.info("answered by %s -> bridging to Gemini", info.dialed)
     await CallSession(info, reader, writer, clog).run()
@@ -140,22 +147,49 @@ async def reap_archive():
                 result = m.group(1) if m else "Unknown"
                 if info.status == "queued":
                     info.status, info.detail = "failed", f"not answered / rejected ({result})"
+                    try:
+                        await run_in_threadpool(call_store.mark_failed, cid, info.detail)
+                    except Exception as e:
+                        log.warning("call row not marked failed: %s", e)
                 os.remove(f"{done_dir}/{fn}")
         except Exception as e:
             log.debug("reaper: %s", e)
 
 
+async def cdr_sync_loop():
+    """Every minute, copy Asterisk's own call durations (CDR) onto the calls table for reconciliation."""
+    while True:
+        try:
+            n = await run_in_threadpool(call_store.sync_cdr)
+            if n:
+                log.info("cdr sync: updated %d call(s)", n)
+        except Exception as e:
+            log.warning("cdr sync failed: %s", e)
+        await asyncio.sleep(60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        lost = await run_in_threadpool(call_store.sweep_orphans)
+        if lost:
+            log.warning("marked %d call(s) as lost (bridge restarted while they were open)", lost)
+        replayed = await run_in_threadpool(replay_spool)
+        if replayed:
+            log.info("replayed %d spooled usage event(s)", replayed)
+    except Exception as e:
+        log.warning("startup sweep failed: %s", e)
     server = await asyncio.start_server(handle_audiosocket, "0.0.0.0", 8092)
     reaper = asyncio.create_task(reap_archive())
+    cdr_task = asyncio.create_task(cdr_sync_loop())
     log.info("AudioSocket listening on :8092; control API on :8093; dial format=%s", DIAL_FORMAT)
     yield
+    cdr_task.cancel()
     reaper.cancel()
     server.close()
 
 
-app = FastAPI(title="Babuland SIP bridge", lifespan=lifespan)
+app = FastAPI(title="upay SIP bridge", lifespan=lifespan)
 
 
 class CallRequest(BaseModel):
@@ -189,9 +223,14 @@ async def start_call(req: CallRequest, x_api_key: str = Header("")):
     )
     CALLS[call_id] = info
     try:
+        await run_in_threadpool(call_store.create_call, call_id, info.conversation_id, dialed, info.name)
+    except Exception as e:
+        log.error("could not persist call row: %s", e)
+    try:
         write_call_file(info)
     except Exception as e:
         info.status, info.detail = "failed", str(e)
+        await run_in_threadpool(call_store.mark_failed, call_id, f"could not queue call: {e}")
         raise HTTPException(500, f"could not queue call: {e}")
     log.info("queued call %s to %s", call_id, dialed)
     return {"call_id": call_id, "conversation_id": info.conversation_id, "dialed": dialed, "status": info.status}

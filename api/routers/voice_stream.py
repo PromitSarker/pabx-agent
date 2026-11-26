@@ -13,6 +13,7 @@ from agent.config import GEMINI_API_KEY, GEMINI_LIVE_MODEL
 from agent.nodes import _build_system_prompt
 from agent.live_tools import LIVE_TOOL_DECLARATIONS, LIVE_TOOLS_MAP
 from api.store import conversation_store
+from agent.usage import record_usage, set_usage_context, tokens_from_live
 from api.admin_store import admin_store
 from api.schemas import ConversationMessage
 
@@ -22,38 +23,23 @@ VOICE_PERSONA_PROMPT = """
 
 --- VOICE CALL PERSONA ---
 
-You are the voice receptionist of Babuland, an indoor playground for children. You are currently on a live phone call with a customer.
+You are the voice assistant of upay for the MTB Islamic DPS savings scheme. You are on a live voice call with a customer who contacted you.
 
 PERSONALITY & APPROACH:
-- You are a warm, patient, and cheerful receptionist who loves helping parents plan a fun visit for their kids.
-- You speak fluent {language} with a professional, confident, and slightly cheerful tone.
-- You sound natural — like a real human expert, not a robotic assistant.
-- You use natural speech patterns and brief pauses to sound human.
-- When giving prices, timings or locations, state the exact figure or address from the knowledge base in one clear sentence. Mention that prices are plus VAT. Never guess.
-- When asked what Babuland offers, briefly describe the rides and play zones that the knowledge base confirms, then ask what the caller would like to know. Do NOT repeat it later in the same call.
+- Warm, polite, patient and clear. Simple words, no banking jargon. Speak fluent {language}.
+- Sound natural, like a helpful person, but never claim to be human. Do not say your name; you are a virtual assistant.
+- State exact figures from the knowledge base in one clear sentence. Never guess. The knowledge base has no profit rate: never quote or estimate profit or maturity amounts.
 
 VOICE CALL RULES:
-- ALWAYS speak in {language}. Never switch to another language unless the caller speaks it first.
-- Do not say your name. You are just a virtual assistant.
-- Keep your responses comprehensive but conversational — this is a phone call. Aim for around 5-6 sentences per turn to ensure no key points are missed.
-- Do NOT use markdown, bullet points, numbered lists, or any text formatting. Speak naturally as if talking on the phone.
-- Do NOT say "star" or read out formatting symbols. Just speak plainly.
+- ALWAYS speak in {language}. Never switch language unless the caller speaks another one first.
 - STRICT RULE: When greeting, you MUST start exactly with "{greeting}" (Do not change this greeting).
-- CONVERSATION FLOW:
-  1. Just answer the caller's questions naturally and briefly.
-- NEVER REPEAT YOURSELF: Do not give the same answer, statistic, or pitch twice in a conversation. Do not ask the exact same question twice. If a number or claim has already been stated this call (e.g., a ticket price or opening hours), do NOT restate it — instead pivot to a different benefit, a new angle, or ask what else the caller wants to know. If you notice you are repeating information, stop and change direction.
-- AVOID LOOPS: If you just asked the user if they want to know about a specific topic (e.g., "speed"), and they say yes, give them the new information and move on. Do NOT ask them again if they want to know about that same topic.
-- Follow-up Questions: Do not repetitively ask detailed follow-up questions digging deeper into the same topic. Once a question is answered, end your response naturally or ask a broad question like "Is there anything else I can help with?". Vary your phrasing naturally.
-- When you need to search the knowledge base or use a tool:
-  - If the check is very quick or simple, you DO NOT need to announce that you are checking. Just check silently and provide the answer.
-  - If you do need to ask the user to wait, DO NOT repeat the same phrase. Use a wide variety of natural, context-aware phrases.
-- If you don't know something, honestly say you are not sure and ask them to call Babuland on +880 9666 723423.
-- If the user asks you to write something down, spell something out, or provide detailed links/information in text, use the `write_to_chat` tool to send it to the chatbox, and verbally confirm that you are writing it in the chat.
-- End calls naturally based on the conversation flow. Keep farewells polite. If the caller asks to end the call, ask for their confirmation before calling the `end_call` tool to disconnect.
-
-- IMPORTANT: You are on a LIVE VOICE CALL. Respond as if speaking on the phone — brief, natural, and human-like. No long paragraphs.
-- IMPORTANT: Even if the user types a message in the chat during the call, you MUST STILL respond verbally (via Voice). Do NOT say things like "I received your text", just answer their text normally as part of the spoken conversation.
-- If the user asks you to read aloud what you or the user previously wrote in the text chat, you MUST comply. Look at the RECENT TEXT CHAT HISTORY provided below and read the requested text aloud clearly and naturally.
+- Phone-style answers: 2-4 short spoken sentences per turn. No markdown, lists or symbols read aloud. Never repeat a fact or ask the same question twice.
+- Use `search_knowledge_base` for every factual question. If the check is quick you do not need to announce it; if you do ask the caller to wait, vary the phrase.
+- If you cannot answer from the knowledge base: say you do not have that information right now, that you are noting down their question, and that a customer service person will contact them soon; then call `note_customer_query`. Never give a phone number.
+- If the user asks you to write something down or send details as text, use the `write_to_chat` tool and say you are writing it in the chat.
+- When the caller is finished, say a polite goodbye and then call `end_call`.
+- IMPORTANT: Even if the user types a message in the chat during the call, still respond verbally.
+- If the user asks you to read aloud what was written in the text chat, look at the RECENT TEXT CHAT HISTORY provided below and read it aloud.
 """
 
 # Ensure model format
@@ -85,29 +71,29 @@ async def voice_websocket_endpoint(websocket: WebSocket, conversation_id: str):
     language_configs = {
         "Bengali": {
             "code": "bn-BD",
-            "greeting": "বাবুল্যান্ডে আপনাকে স্বাগতম। আমি আপনাকে কীভাবে সাহায্য করতে পারি?",
+            "greeting": "উপায়-এ আপনাকে স্বাগতম। এমটিবি ইসলামিক ডিপিএস নিয়ে আমি আপনাকে কীভাবে সাহায্য করতে পারি?",
             "voice": "Leda" # Just use default or try to rely on what works
         },
         "English": {
             "code": "en-US",
-            "greeting": "Hello! Thank you for calling Babuland. How can I help you today?",
+            "greeting": "Hello! Welcome to upay. How can I help you with MTB Islamic DPS today?",
             "voice": "Aoede"
         },
         "Spanish": {
             "code": "es-ES",
-            "greeting": "¡Hola! Gracias por llamar a Babuland. ¿Cómo puedo ayudarle hoy?",
+            "greeting": "¡Hola! Bienvenido a upay. ¿Cómo puedo ayudarle con MTB Islamic DPS hoy?",
             "voice": "Aoede"
         },
         "Portuguese": {
             "code": "pt-PT",
-            "greeting": "Olá! Obrigado por ligar para a Babuland. Como posso ajudá-lo hoje?",
+            "greeting": "Olá! Bem-vindo à upay. Como posso ajudá-lo com o MTB Islamic DPS hoje?",
             "voice": "Aoede"
         }
     }
     
     config = language_configs.get(current_language, language_configs["Bengali"])
     
-    system_prompt = _build_system_prompt(session_summary, current_language)
+    system_prompt = _build_system_prompt(session_summary, current_language, voice=True)
     
     # Fetch recent raw messages for exact context if the user asks to read them
     recent_messages_full = await run_in_threadpool(conversation_store.get_messages, conversation_id)
@@ -181,22 +167,6 @@ async def voice_websocket_endpoint(websocket: WebSocket, conversation_id: str):
     except Exception as e:
         print(f"Error in voice websocket: {str(e)}")
     finally:
-        session_duration = time.time() - start_time
-        # Record final session tokens to DB if any were captured, using a threadpool to avoid blocking ASGI loop
-        try:
-            if session_tokens["input"] > 0 or session_tokens["output"] > 0:
-                print(f"Recording live session tokens: {session_tokens}")
-                await run_in_threadpool(
-                    conversation_store.record_token_usage,
-                    conversation_id, 
-                    session_tokens["input"], 
-                    session_tokens["output"], 
-                    GEMINI_LIVE_MODEL,
-                    session_duration
-                )
-        except Exception as e:
-            print(f"Failed to record live session tokens: {e}")
-
         try:
             await websocket.close()
         except:
@@ -273,7 +243,7 @@ async def proxy_client_to_gemini(client_ws: WebSocket, gemini_ws, conversation_i
 async def proxy_gemini_to_client(client_ws: WebSocket, gemini_ws, conversation_id: str, session_tokens: dict):
     """Reads from Gemini and routes audio/text to client, and handles tool calls."""
     response_count = 0
-    current_turn_output = 0
+    set_usage_context(conversation_id, "web_voice")  # tool calls (query rewrite, embeddings) attribute usage to this call
     is_initial_greeting = True
     initial_greeting_buffer = []
     
@@ -292,18 +262,9 @@ async def proxy_gemini_to_client(client_ws: WebSocket, gemini_ws, conversation_i
                 usage = data["serverContent"]["modelTurn"]["usageMetadata"]
                 
             if usage:
-                # Live API token tracking is usually cumulative per session for prompt. 
-                # We save the max seen to record it when the session closes.
-                session_tokens["input"] = max(session_tokens["input"], usage.get("promptTokenCount", 0))
-                
-                # Output tokens can be under candidatesTokenCount or responseTokenCount
-                out_tokens = usage.get("candidatesTokenCount") or usage.get("responseTokenCount", 0)
-                if not out_tokens and "totalTokenCount" in usage and "promptTokenCount" in usage:
-                    out_tokens = usage["totalTokenCount"] - usage["promptTokenCount"]
-                    
-                # Track the maximum output tokens for the current turn (as it streams in)
-                if out_tokens:
-                    current_turn_output = max(current_turn_output, out_tokens)
+                # one usage message arrives per generated turn: each is a billed event (text/audio split kept)
+                await run_in_threadpool(record_usage, model=GEMINI_LIVE_MODEL, purpose="live_turn", channel="web_voice",
+                                        session_id=conversation_id, raw=usage, **tokens_from_live(usage))
 
             if "serverContent" in data:
                 server_content = data["serverContent"]
@@ -339,8 +300,6 @@ async def proxy_gemini_to_client(client_ws: WebSocket, gemini_ws, conversation_i
                     else:
                         await client_ws.send_json({"turnComplete": True})
                         
-                    session_tokens["output"] += current_turn_output
-                    current_turn_output = 0
 
                 if "modelTurn" in server_content:
                     parts = server_content["modelTurn"].get("parts", [])
@@ -439,4 +398,4 @@ async def proxy_gemini_to_client(client_ws: WebSocket, gemini_ws, conversation_i
     except Exception as e:
         print("gemini_to_client exception:", str(e))
     finally:
-        session_tokens["output"] += current_turn_output
+        pass

@@ -1,8 +1,8 @@
-# Babuland Outbound Call API (SIP bridge, port 8093)
+# upay Outbound Call API (SIP bridge, port 8093)
 
 Base URL: `http://103.228.38.69:8093`
 
-This service lets another system ask the Babuland AI agent to place a **phone call**. It is separate from the
+This service lets another system ask the upay AI agent (MTB Islamic DPS) to place a **phone call**. It is separate from the
 chat API (`api.md`, port 8002).
 
 > `GET /` returns 404 by design – there is no landing page. Use the endpoints below, or open
@@ -24,13 +24,31 @@ chat API (`api.md`, port 8002).
 ```
 
 1. `POST /call` validates the API key and number, then writes `<call_id>.call` into Asterisk's outgoing spool.
-2. Asterisk dials `PJSIP/<number>@adn` with caller ID "Babuland". Nobody answering/rejecting → status `failed`.
+2. Asterisk dials `PJSIP/<number>@adn` with caller ID "upay". Nobody answering/rejecting → status `failed`.
 3. When the callee answers, Asterisk opens an AudioSocket connection to the bridge (port 8092, internal only)
    and sends the call UUID. The bridge looks up the call and connects the audio to Gemini Live.
-4. The agent speaks with the Babuland system prompt plus an outbound persona (greets, states the purpose,
-   answers from the knowledge base, can `search_knowledge_base`, `save_collected_information`, `escalate`
-   and `end_call`). Transcripts are saved as a conversation named `call-<first 8 chars of call_id>`.
+3a. **Two-phase call (cost saver).** On pickup the bridge plays a *pre-recorded* greeting (`data/prompts/*.pcm`, made once with
+   `scripts/generate_canned_audio.py`) and only opens the paid Gemini Live session once the person actually speaks (about 160 ms of
+   speech; the last 0.5 s of audio is kept so no first words are lost). If nobody speaks: two recorded "are you there?" nudges, a
+   recorded goodbye, hang-up (outcome `no_response`, hard cap 60 s) and **no Gemini cost at all**. Set `SIP_CANNED_AUDIO=0` to go back
+   to the model speaking the greeting. Tuning: `SIP_LAZY_MIN_RMS`, `SIP_LAZY_SPEECH_FRAMES`, `SIP_PREROLL_FRAMES`, `SIP_CATCHUP_SPEED`,
+   `SIP_NO_SPEECH_CAP_S`. A pre-roll of 1.5 s made Gemini cut its own first answer short in 3 of 4 test runs; 0.5 s did not.
+4. The agent runs a fixed script: it greets, says it is upay's virtual assistant calling about the MTB Islamic DPS,
+   and asks whether the person has time. Only on a "yes" does it explain what the scheme offers and why it is useful,
+   then answers questions from `knowledge/upay_dps.md` (inlined in its prompt, no search step). Anything it cannot
+   answer is noted with `note_customer_query` (saved in the lead data as "Unanswered Query #n" + "Follow-up Needed")
+   and the person is told customer service will contact them; no number is given. Other tools: `save_collected_information`, `end_call`. Transcripts are saved as a conversation named `call-<first 8 chars of call_id>`.
 5. Calls end on hang-up, `end_call`, or after `SIP_MAX_CALL_SECONDS` (default 300).
+6. Line handling: if nobody speaks for ~7 s the agent checks "are you there?" (max 2 times), then says goodbye and hangs up
+   (outcome `no_response`, covers voicemail/dead air). Once the agent has said goodbye it hangs up after ~3 s. About 45 s before
+   `SIP_MAX_CALL_SECONDS` the agent is told to wrap up and say goodbye; Asterisk's hard cut-off stays as the backstop.
+7. The result of each call is saved in the lead data: `Call Outcome` (`interested`, `not_interested`, `call_later`, `do_not_call`,
+   `wrong_number`, `answered_questions`, `no_response`, or `ended_without_outcome` if the agent hung up without choosing) and
+   `Call Duration (s)`. Questions the agent could not answer are `Unanswered Query #n` plus `Follow-up Needed`.
+8. The bridge log shows `latency: X.XXs` per turn (callee last audible speech -> first agent audio), a `latency summary` line
+   per call, and `call ending: <reason>`.
+   Tuning env vars (all optional): `SIP_START_SENS`, `SIP_END_SENS`, `SIP_PREFIX_MS`, `SIP_SILENCE_MS`, `SIP_SILENCE_NUDGE_S`,
+   `SIP_MAX_NUDGES`, `SIP_WRAPUP_BEFORE_S`, `SIP_CLOSING_HANGUP_S`, `SIP_VOICE_RMS`.
 
 ## Authentication
 
@@ -54,7 +72,7 @@ Request body (JSON):
 |------------|--------|----------|-------|
 | `number`   | string | yes      | Bangladeshi number: `01XXXXXXXXX`, `8801XXXXXXXXX`, `+8801XXXXXXXXX`, `1XXXXXXXXX`. Spaces, dashes, brackets are ignored. Other countries are rejected unless the server sets `SIP_ALLOW_INTERNATIONAL=1`. |
 | `name`     | string | no       | Callee's name, max 60 chars. Lets the agent address them personally. |
-| `purpose`  | string | no       | Why we are calling, max 500 chars. Defaults to a generic Babuland follow-up (`SIP_DEFAULT_PURPOSE`). |
+| `purpose`  | string | no       | Why we are calling, max 500 chars. Defaults to the MTB Islamic DPS introduction (`SIP_DEFAULT_PURPOSE`). |
 | `language` | string | no       | `Bengali`, `English`, `Spanish`, `Portuguese`. Defaults to the admin-panel "agent language" setting (Bengali). |
 
 Example:

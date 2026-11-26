@@ -2,21 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Users, FileText, Send, Database, AlertCircle, CheckCircle, DollarSign, Settings, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// Do not hard-code localhost: it points at the administrator's own computer
-// when this panel is opened from another device.
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `${window.location.protocol}//${window.location.hostname}:8002/api`;
-
-async function getApiError(response) {
-  const body = await response.json().catch(() => null);
-  return body?.detail || body?.message || `Request failed (${response.status})`;
-}
+import { API_BASE_URL, TOKEN_KEY, authFetch, getApiError } from './api';
+import BillingView from './Billing';
+import LoginView from './Login';
 
 export default function App() {
+  const [authed, setAuthed] = useState(!!localStorage.getItem(TOKEN_KEY));
   const [activeTab, setActiveTab] = useState('dashboard');
+
+  if (!authed) return <LoginView onLogin={() => setAuthed(true)} />;
+  const logout = () => { localStorage.removeItem(TOKEN_KEY); setAuthed(false); };
 
   return (
     <div className="app-container">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={logout} />
       <main className="main-content">
         {activeTab === 'dashboard' && <DashboardView />}
         {activeTab === 'leads' && <LeadsView />}
@@ -28,7 +27,7 @@ export default function App() {
   );
 }
 
-function Sidebar({ activeTab, setActiveTab }) {
+function Sidebar({ activeTab, setActiveTab, onLogout }) {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
     { id: 'leads', label: 'Collected Leads', icon: <Users size={20} /> },
@@ -40,7 +39,7 @@ function Sidebar({ activeTab, setActiveTab }) {
   return (
     <div className="sidebar">
       <div className="brand">
-        <img src="/logo.png" alt="Babuland Logo" className="brand-logo" />
+        <img src="/logo.png" alt="upay Logo" className="brand-logo" />
         <span className="brand-text">Admin</span>
       </div>
       <div className="nav-menu">
@@ -54,6 +53,10 @@ function Sidebar({ activeTab, setActiveTab }) {
             <span>{item.label}</span>
           </div>
         ))}
+        <div className="nav-item" onClick={onLogout} style={{ marginTop: 24 }}>
+          <X size={20} />
+          <span>Log out</span>
+        </div>
       </div>
     </div>
   );
@@ -66,7 +69,7 @@ function DashboardView() {
 
   const fetchConversations = () => {
     setLoading(true);
-    fetch(`${API_BASE_URL}/admin/conversations`)
+    authFetch(`${API_BASE_URL}/admin/conversations`)
       .then(res => res.json())
       .then(data => {
         setConversations(data);
@@ -85,7 +88,7 @@ function DashboardView() {
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this conversation?")) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/conversations/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`${API_BASE_URL}/admin/conversations/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await getApiError(res));
       fetchConversations();
     } catch (err) {
@@ -97,7 +100,7 @@ function DashboardView() {
   const handleDeleteAll = async () => {
     if (!window.confirm("Are you sure you want to delete ALL conversations? This cannot be undone.")) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/conversations`, { method: 'DELETE' });
+      const res = await authFetch(`${API_BASE_URL}/admin/conversations`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await getApiError(res));
       fetchConversations();
     } catch (err) {
@@ -253,7 +256,7 @@ function LeadsView() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/admin/collected_data`)
+    authFetch(`${API_BASE_URL}/admin/collected_data`)
       .then(res => res.json())
       .then(data => {
         setLeads(data);
@@ -360,7 +363,7 @@ function KnowledgeBaseView() {
   const fetchDocs = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/documents`);
+      const res = await authFetch(`${API_BASE_URL}/documents`);
       if (!res.ok) throw new Error(await getApiError(res));
       const data = await res.json();
       setDocuments(data.documents || []);
@@ -392,7 +395,7 @@ function KnowledgeBaseView() {
           formData.append('metadata_str', docMetadata);
         }
 
-        const res = await fetch(`${API_BASE_URL}/documents/upload`, {
+        const res = await authFetch(`${API_BASE_URL}/documents/upload`, {
           method: 'POST',
           body: formData
         });
@@ -405,7 +408,7 @@ function KnowledgeBaseView() {
           meta = JSON.parse(docMetadata);
         }
         
-        const res = await fetch(`${API_BASE_URL}/documents`, {
+        const res = await authFetch(`${API_BASE_URL}/documents`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: docText, metadata: meta })
@@ -432,7 +435,7 @@ function KnowledgeBaseView() {
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this document?")) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/documents/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`${API_BASE_URL}/documents/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error(await getApiError(res));
       fetchDocs();
     } catch (err) {
@@ -555,103 +558,13 @@ function KnowledgeBaseView() {
   );
 }
 
-function BillingView() {
-  const [costData, setCostData] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  const fetchCost = () => {
-    setLoading(true);
-    fetch(`${API_BASE_URL}/admin/cost_summary`)
-      .then(res => res.json())
-      .then(data => {
-        setCostData(data);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error("Failed to fetch cost summary", err);
-        setLoading(false);
-      });
-  };
-
-  useEffect(() => {
-    fetchCost();
-  }, []);
-
-  const handleReset = async () => {
-    if (!window.confirm("Are you sure you want to reset all token usage logs? This will delete all cost history.")) return;
-    try {
-      const res = await fetch(`${API_BASE_URL}/admin/cost_summary`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(await getApiError(res));
-      fetchCost();
-    } catch (err) {
-      console.error(err);
-      alert(`Could not reset cost summary: ${err.message}`);
-    }
-  };
-
-  return (
-    <div className="fade-in">
-      <div className="page-header">
-        <h1 className="page-title">Billing & Cost</h1>
-        <p className="page-subtitle">Track exact token usage and API costs</p>
-      </div>
-
-      <div className="dashboard-grid">
-        <div className="glass-card">
-          <h3 style={{ color: 'var(--text-muted)', marginBottom: '8px', fontSize: '0.9rem' }}>Total Input Tokens</h3>
-          <div style={{ fontSize: '2.5rem', fontWeight: 'bold' }}>
-            {loading ? '...' : (costData?.total_input_tokens || 0).toLocaleString()}
-          </div>
-        </div>
-        <div className="glass-card">
-          <h3 style={{ color: 'var(--text-muted)', marginBottom: '8px', fontSize: '0.9rem' }}>Total Output Tokens</h3>
-          <div style={{ fontSize: '2.5rem', fontWeight: 'bold' }}>
-            {loading ? '...' : (costData?.total_output_tokens || 0).toLocaleString()}
-          </div>
-        </div>
-        <div className="glass-card">
-          <h3 style={{ color: 'var(--text-muted)', marginBottom: '8px', fontSize: '0.9rem' }}>Total Usage Duration (s)</h3>
-          <div style={{ fontSize: '2.5rem', fontWeight: 'bold' }}>
-            {loading ? '...' : (costData?.total_duration_seconds || 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}s
-          </div>
-        </div>
-        <div className="glass-card">
-          <h3 style={{ color: 'var(--text-muted)', marginBottom: '8px', fontSize: '0.9rem' }}>Cost Per Minute</h3>
-          <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'var(--success)' }}>
-            ${loading ? '...' : (costData?.cost_per_minute_usd || 0).toFixed(6)}
-          </div>
-        </div>
-      </div>
-
-      <div className="glass-card" style={{ marginTop: '24px' }}>
-        <h3 style={{ color: 'var(--text-muted)', marginBottom: '8px', fontSize: '0.9rem' }}>Estimated Total Cost</h3>
-        <div style={{ fontSize: '3rem', fontWeight: 'bold', color: 'var(--success)', marginBottom: '24px' }}>
-          ${loading ? '...' : (costData?.total_cost_usd || 0).toFixed(6)}
-        </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <button 
-            className="btn" 
-            style={{ background: 'var(--danger)', color: 'white' }} 
-            onClick={handleReset}
-          >
-            Reset Cost Tracking
-          </button>
-          <button className="btn" onClick={fetchCost} style={{ background: 'var(--primary)', color: 'white' }}>
-            Refresh
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SettingsView() {
   const [language, setLanguage] = useState('Bengali');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/admin/settings`)
+    authFetch(`${API_BASE_URL}/admin/settings`)
       .then(res => res.json())
       .then(data => {
         if (data && data.agent_language) {
@@ -665,7 +578,7 @@ function SettingsView() {
     setSaving(true);
     setMessage(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/admin/settings`, {
+      const res = await authFetch(`${API_BASE_URL}/admin/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: 'agent_language', value: language })

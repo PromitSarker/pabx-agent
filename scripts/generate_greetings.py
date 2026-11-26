@@ -20,29 +20,29 @@ GEMINI_WS_URL = f"wss://generativelanguage.googleapis.com/ws/google.ai.generativ
 language_configs = {
     "Bengali": {
         "code": "bn-BD",
-        "greeting": "বাবুল্যান্ডে আপনাকে স্বাগতম। আমি আপনাকে কীভাবে সাহায্য করতে পারি?",
+        "greeting": "উপায়-এ আপনাকে স্বাগতম। এমটিবি ইসলামিক ডিপিএস নিয়ে আমি আপনাকে কীভাবে সাহায্য করতে পারি?",
         "voice": "Leda"
     },
     "English": {
         "code": "en-US",
-        "greeting": "Hello! Thank you for calling Babuland. How can I help you today?",
+        "greeting": "Hello! Welcome to upay. How can I help you with MTB Islamic DPS today?",
         "voice": "Aoede"
     },
     "Spanish": {
         "code": "es-ES",
-        "greeting": "¡Hola! Gracias por llamar a Babuland. ¿Cómo puedo ayudarle hoy?",
+        "greeting": "¡Hola! Bienvenido a upay. ¿Cómo puedo ayudarle con MTB Islamic DPS hoy?",
         "voice": "Aoede"
     },
     "Portuguese": {
         "code": "pt-PT",
-        "greeting": "Olá! Obrigado por ligar para a Babuland. Como posso ajudá-lo hoje?",
+        "greeting": "Olá! Bem-vindo à upay. Como posso ajudá-lo com o MTB Islamic DPS hoje?",
         "voice": "Aoede"
     }
 }
 
 VOICE_PERSONA_PROMPT = """
 --- VOICE CALL PERSONA ---
-You are the voice receptionist of Babuland.
+You are the voice assistant of upay for the MTB Islamic DPS.
 - STRICT RULE: When greeting, you MUST start exactly with "{greeting}" (Do not change this greeting).
 """
 

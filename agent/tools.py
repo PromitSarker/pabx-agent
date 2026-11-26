@@ -15,7 +15,7 @@ def escalate(reason: str) -> str:
 	Why it's needed: Bots shouldn't handle arguments or disputes! This acts like an "emergency exit"
 	button for the LLM to easily hand the interaction over to real customer support.
 	"""
-	return "I am connecting you to a human agent who can assist with this request. They will be with you shortly!"
+	return "A customer service person will contact the customer soon. Tell the customer this; do not give any phone number."
 
 
 def rewrite_query(original_query: str) -> str:
@@ -27,15 +27,21 @@ def rewrite_query(original_query: str) -> str:
 	class RewrittenQuery(BaseModel):
 		query: str
 
-	llm = ChatGoogleGenerativeAI(model="gemini-3.8-flash", google_api_key=GEMINI_API_KEY)
-	structured_llm = llm.with_structured_output(RewrittenQuery)
+	llm = ChatGoogleGenerativeAI(model="gemini-3.8-flash", google_api_key=GEMINI_API_KEY, thinking_budget=0)
+	structured_llm = llm.with_structured_output(RewrittenQuery, include_raw=True)
 	prompt = (
 		"Rewrite the following search query to correct any spelling mistakes "
 		"and make it a clear, standalone search query for a knowledge base.\n\n"
 		f"Query: {original_query}"
 	)
 	try:
-		response = structured_llm.invoke(prompt)
+		result = structured_llm.invoke(prompt)
+		response = result.get("parsed") if isinstance(result, dict) else result
+		if isinstance(result, dict) and result.get("raw") is not None:
+			from agent.usage import record_usage, tokens_from_langchain
+			raw = result["raw"]
+			record_usage(model=(getattr(raw, "response_metadata", None) or {}).get("model_name") or "gemini-3.8-flash",
+						 purpose="query_rewrite", **tokens_from_langchain(getattr(raw, "usage_metadata", None)))
 		corrected = response.query.strip() if response and response.query else original_query
 		print(f"[QueryRewriter] '{original_query}' -> '{corrected}'")
 		return corrected
@@ -48,7 +54,7 @@ def search_knowledge_base(query: str) -> str:
 	"""
 	Search the knowledge base for general information, policies, or FAQs.
 	
-	Why it's needed: Use this when the user asks a general question about Babuland, its branches, opening hours, tickets, pricing, membership, parties or rules.
+	Why it's needed: Use this when the user asks a question about the MTB Islamic DPS on upay: eligibility, plans, deposit amounts, tenure, profit, tax, withdrawal, early encashment, instalments, nominee or charges.
 	"""
 	from agent.rag import search_documents
 	corrected_query = rewrite_query(query)
@@ -91,6 +97,50 @@ def save_collected_information(data: Dict[str, str], session_id: str = "") -> st
 		return f"ERROR: Could not save information: {str(e)}"
 
 
+class NoteCustomerQueryInput(BaseModel):
+	query: str
+	kind: str = "question"
+	session_id: str = "" # Injected by the system, LLM does not need to provide this.
+
+
+_QUERY_LABELS = {"question": "Unanswered Query", "callback": "Callback Request", "complaint": "Complaint"}
+
+
+@tool(args_schema=NoteCustomerQueryInput)
+def note_customer_query(query: str, kind: str = "question", session_id: str = "") -> str:
+	"""
+	Note down something a customer service person must follow up on: a question you could not answer
+	from the knowledge base, a request to be called back, or a complaint.
+	kind is one of: "question" (default), "callback", "complaint".
+	Do NOT provide session_id, it is injected automatically.
+
+	Each call adds a NEW numbered entry (Unanswered Query #1, #2, ...) so earlier ones are never overwritten,
+	and flags the session as needing follow-up.
+	"""
+	if not session_id:
+		return "ERROR: session_id is missing."
+	query = (query or "").strip()
+	if not query:
+		return "ERROR: query is empty."
+	label = _QUERY_LABELS.get((kind or "").strip().lower(), _QUERY_LABELS["question"])
+	try:
+		with get_connection() as conn:
+			with conn.cursor() as cur:
+				cur.execute("SELECT id FROM collected_data WHERE session_id = %s AND `key` LIKE %s", (session_id, label + " #%"))
+				n = len(cur.fetchall()) + 1
+				cur.execute("INSERT INTO collected_data (session_id, `key`, `value`) VALUES (%s, %s, %s)",
+							(session_id, f"{label} #{n}", query[:1000]))
+				cur.execute("UPDATE collected_data SET `value` = %s, created_at = CURRENT_TIMESTAMP(6) WHERE session_id = %s AND `key` = %s",
+							("Yes - customer service to contact", session_id, "Follow-up Needed"))
+				if cur.rowcount == 0:
+					cur.execute("INSERT INTO collected_data (session_id, `key`, `value`) VALUES (%s, %s, %s)",
+								(session_id, "Follow-up Needed", "Yes - customer service to contact"))
+			conn.commit()
+		return f"Noted as {label} #{n}. If you have not already said so aloud, tell the customer now that you have noted it down and a customer service person will contact them soon. Do not give a phone number."
+	except Exception as e:
+		return f"ERROR: Could not note the query: {str(e)}"
+
+
 class SendVerificationEmailInput(BaseModel):
 	email: str
 	session_id: str = "" # Injected by the system, LLM does not need to provide this.
@@ -131,10 +181,10 @@ def send_verification_email(email: str, session_id: str = "") -> str:
 			from agent.config import RESEND_FROM_EMAIL
 			resend.api_key = RESEND_API_KEY
 			params = {
-				"from": f"Babuland <{RESEND_FROM_EMAIL}>",
+				"from": f"upay <{RESEND_FROM_EMAIL}>",
 				"to": [email],
-				"subject": "Babuland Verification Code",
-				"text": f"Hello,\n\nYour temporary password is: {code}\n\nIMPORTANT: This is a temporary password, and you need to change it immediately after you log in.\n\nThank you,\nBabuland"
+				"subject": "upay Verification Code",
+				"text": f"Hello,\n\nYour temporary password is: {code}\n\nIMPORTANT: This is a temporary password, and you need to change it immediately after you log in.\n\nThank you,\nupay"
 			}
 			resend.Emails.send(params)
 			return "Verification code successfully sent to email."

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, MessageSquarePlus, MessageSquare, Paperclip, Loader2, Phone, PhoneOff, Mic, MicOff, Globe, Bot, Server, Database, Cpu, Code, Mail, Headphones, Settings, Ticket, Clock, MapPin, Users, Cake, Smile } from 'lucide-react';
+import { Send, MessageSquarePlus, MessageSquare, Paperclip, Loader2, Phone, PhoneOff, Mic, MicOff, Globe, Bot, Server, Database, Cpu, Code, Mail, Headphones, Settings, Ticket, Clock, MapPin, Users, Cake, Smile, Wallet, Calendar, ShieldCheck, Banknote } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -566,7 +566,7 @@ function App() {
 
       <header className="header">
         <div className="header-brand">
-          <img src="/logo.png" alt="Babuland Logo" className="brand-logo" />
+          <img src="/logo.png" alt="upay Logo" className="brand-logo" />
         </div>
         {actionButtons}
       </header>
@@ -579,107 +579,107 @@ function App() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
-            <img src="/logo.png" alt="Babuland Logo" className="empty-state-logo" />
-            <h2>Welcome to Babuland</h2>
-            <p>Ask about our branches, opening hours, tickets, rides, birthday parties and membership.</p>
+            <img src="/logo.png" alt="upay Logo" className="empty-state-logo" />
+            <h2>Welcome to upay</h2>
+            <p>Ask about the MTB Islamic DPS savings scheme: plans, deposits, profit rules, withdrawal and more.</p>
 
             <div className="suggestion-cards">
               <motion.div
                 className="suggestion-card blue"
-                onClick={() => handleQuickSend("Which Babuland branches are there and where are they?")}
+                onClick={() => handleQuickSend("What is MTB Islamic DPS on upay?")}
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.1 }}
+                transition={{ duration: 0.4, delay: 0.10 }}
               >
                 <div className="card-header">
-                  <MapPin className="card-icon" size={24} />
+                  <Wallet className="card-icon" size={24} />
                 </div>
-                <h3 className="card-title">Our Branches</h3>
-                <p className="card-desc">Find a Babuland near you in Dhaka, Narayanganj, Cumilla and Chattogram.</p>
+                <h3 className="card-title">What is MTB Islamic DPS?</h3>
+                <p className="card-desc">A Shariah-compliant monthly savings scheme from MTB, opened in the upay app.</p>
               </motion.div>
 
               <motion.div
                 className="suggestion-card orange"
-                onClick={() => handleQuickSend("What are Babuland's opening hours?")}
+                onClick={() => handleQuickSend("What are the deposit amounts and tenures?")}
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: 0.15 }}
               >
                 <div className="card-header">
-                  <Clock className="card-icon" size={24} />
+                  <Calendar className="card-icon" size={24} />
                 </div>
-                <h3 className="card-title">Opening Hours</h3>
-                <p className="card-desc">Open 7 days a week - check the hours for weekdays, weekends and holidays.</p>
+                <h3 className="card-title">Plans & Amounts</h3>
+                <p className="card-desc">24, 36 or 48 months, with monthly deposits from 200 Taka.</p>
               </motion.div>
 
               <motion.div
                 className="suggestion-card purple"
-                onClick={() => handleQuickSend("How much are the tickets at Babuland?")}
+                onClick={() => handleQuickSend("Who can open an upay DPS and is there any paperwork or fee?")}
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.2 }}
+                transition={{ duration: 0.4, delay: 0.20 }}
               >
                 <div className="card-header">
-                  <Ticket className="card-icon" size={24} />
+                  <ShieldCheck className="card-icon" size={24} />
                 </div>
-                <h3 className="card-title">Tickets & Pricing</h3>
-                <p className="card-desc">Child, guardian and infant passes, plus the mandatory grip socks.</p>
+                <h3 className="card-title">Who Can Open It</h3>
+                <p className="card-desc">Active, full-profile upay customers. No paperwork or processing fee.</p>
               </motion.div>
 
               <motion.div
                 className="suggestion-card teal"
-                onClick={() => handleQuickSend("Tell me about birthday parties at Babuland.")}
+                onClick={() => handleQuickSend("When can I withdraw my money?")}
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: 0.25 }}
               >
                 <div className="card-header">
-                  <Cake className="card-icon" size={24} />
+                  <Banknote className="card-icon" size={24} />
                 </div>
-                <h3 className="card-title">Birthday Parties</h3>
-                <p className="card-desc">Customized party packages and theme decorations for your child.</p>
+                <h3 className="card-title">Withdrawal & Maturity</h3>
+                <p className="card-desc">What happens at maturity and how early encashment works.</p>
               </motion.div>
 
               <motion.div
                 className="suggestion-card rose"
-                onClick={() => handleQuickSend("Tell me about the Babuland Club membership.")}
+                onClick={() => handleQuickSend("How will my monthly instalment be collected?")}
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.3 }}
+                transition={{ duration: 0.4, delay: 0.30 }}
               >
                 <div className="card-header">
-                  <Users className="card-icon" size={24} />
+                  <Clock className="card-icon" size={24} />
                 </div>
-                <h3 className="card-title">Club Membership</h3>
-                <p className="card-desc">Priority entry and special discounts for members.</p>
+                <h3 className="card-title">Instalments</h3>
+                <p className="card-desc">Automatic deduction from your upay account, with an SMS reminder.</p>
               </motion.div>
 
               <motion.div
                 className="suggestion-card indigo"
-                onClick={() => handleQuickSend("What rides and play zones does Babuland have?")}
+                onClick={() => handleQuickSend("Can I change my nominee, and how does the e-TIN affect tax?")}
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4, delay: 0.35 }}
               >
                 <div className="card-header">
-                  <Smile className="card-icon" size={24} />
+                  <Users className="card-icon" size={24} />
                 </div>
-                <h3 className="card-title">Rides & Play Zones</h3>
-                <p className="card-desc">Slides, ball pits, trampolines, bumper cars and soft play for toddlers.</p>
+                <h3 className="card-title">Nominee & Tax</h3>
+                <p className="card-desc">Nominee changes and the lower tax rate with an e-TIN.</p>
               </motion.div>
 
               <motion.div
                 className="suggestion-card green"
-                onClick={() => handleQuickSend("How can I contact Babuland?")}
+                onClick={() => handleQuickSend("I have a question that is not covered here.")}
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.4 }}
+                transition={{ duration: 0.4, delay: 0.40 }}
               >
                 <div className="card-header">
                   <Headphones className="card-icon" size={24} />
                 </div>
-                <h3 className="card-title">Contact Us</h3>
-                <p className="card-desc">Call us or download the Babuland app to book tickets.</p>
+                <h3 className="card-title">Something else?</h3>
+                <p className="card-desc">Ask us anything - we note it and customer service will contact you.</p>
               </motion.div>
             </div>
           </motion.div>

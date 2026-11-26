@@ -62,6 +62,7 @@ services:
       SIP_MAX_CALL_SECONDS: ${SIP_MAX_CALL_SECONDS:-300}
     volumes:
       - sip_spool:/var/spool/asterisk
+      - asterisk_cdr:/var/log/asterisk/cdr-csv   # call records survive container rebuilds
     restart: unless-stopped
 
   sip-bridge:
@@ -76,6 +77,7 @@ services:
       - ./data:/app/data
       - ./chroma_db:/app/chroma_db
       - sip_spool:/var/spool/asterisk
+      - asterisk_cdr:/var/log/asterisk/cdr-csv:ro
     restart: unless-stopped
     depends_on:
       db:
@@ -84,3 +86,4 @@ services:
 volumes:
   mysql_data:
   sip_spool:
+  asterisk_cdr:
