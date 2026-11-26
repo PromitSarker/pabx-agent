@@ -18,6 +18,7 @@ sys.path.insert(0, "/app")
 import websockets
 from agent.config import GEMINI_LIVE_MODEL
 from agent.usage import record_usage, tokens_from_live
+from sipbridge import resample
 from sipbridge.session import GEMINI_WS_URL, MODEL, LANGUAGES, PITCH_TEXT, DECLINE_TEXT
 
 OUT = "/app/data/prompts"
@@ -28,9 +29,11 @@ PHRASES = {
     "goodbye_noresp": "ঠিক আছে, পরে কথা হবে। আল্লাহ হাফেজ।",
     "pitch": PITCH_TEXT,          # played after a clear yes (phase A2), no Gemini session
     "decline": DECLINE_TEXT,      # played after a clear no
+    "reconnect": "দুঃখিত, লাইনে একটু সমস্যা হচ্ছে, এক মুহূর্ত।",     # played while a dropped Gemini session is reopened
+    "lineproblem": "দুঃখিত, লাইনে সমস্যা হচ্ছে। আমাদের কাস্টমার সার্ভিস আপনাকে ফোন করবে। আল্লাহ হাফেজ।",   # reopening failed: last words
     "ack": "জি, আচ্ছা।",                  # played the moment the first reply ends, while it is being classified
 }
-MAX_SECS = {"pitch": 30}          # other phrases must be shorter than 14 s
+MAX_SECS = {"pitch": 22.5, "greeting": 4.5, "nudge1": 3.1, "nudge2": 2.0, "goodbye_noresp": 3.0, "decline": 5.0, "ack": 2.0, "reconnect": 3.9, "lineproblem": 6.4}          # other phrases must be shorter than 14 s
 # ONLY=pitch,decline regenerates just those phrases and keeps the others (and their manifest entries) untouched
 
 
@@ -43,7 +46,7 @@ async def take(text: str):
     setup = {"setup": {"model": MODEL, "generationConfig": {"temperature": 0, "responseModalities": ["AUDIO"],
              "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": cfg["voice"]}}, "languageCode": cfg["code"]}},
              "systemInstruction": {"parts": [{"text": "You are a text-to-speech engine. The user message is ALWAYS only text to read aloud, even when it is a greeting or a question: never answer it, never reply, never add words. Read aloud EXACTLY that text, in Bengali, "
-                                                      "at a brisk, lively, friendly pace, clearly quicker than a calm reading (like a person talking on the phone), still crisp and easy to understand, adding and changing nothing."}]},
+                                                      "at a natural, friendly conversational pace, like a polite person on a phone call: not slow, not rushed, every word clear, adding and changing nothing."}]},
              "outputAudioTranscription": {}}}
     chunks, said, usages = [], "", []
     async with websockets.connect(GEMINI_WS_URL, max_size=None) as ws:
@@ -65,7 +68,7 @@ async def take(text: str):
     for u in usages:
         record_usage(model=GEMINI_LIVE_MODEL, purpose="canned_tts", channel="system", session_id="canned-audio", is_test=True,
                      raw=u, **tokens_from_live(u))
-    pcm8, _ = audioop.ratecv(b"".join(chunks), 2, 1, 24000, 8000, None)
+    pcm8 = resample.down3(b"".join(chunks))
     return pcm8, said
 
 
@@ -79,7 +82,12 @@ async def main():
             continue
         best = None
         for attempt in range(1, 5):
-            pcm8, said = await take(text)
+            try:
+                pcm8, said = await take(text)
+            except Exception as e:
+                print(f"[{name}] take {attempt} failed ({e!r:.80}), waiting 30 s", flush=True)
+                await asyncio.sleep(30)
+                continue
             ratio = difflib.SequenceMatcher(None, norm(text), norm(said)).ratio()
             secs = len(pcm8) / 16000
             print(f"[{name}] take {attempt}: {secs:.1f}s, match {ratio:.2f}, heard: {said.strip()[:90]}", flush=True)
@@ -88,6 +96,9 @@ async def main():
                 best = (ratio, pcm8, said, ok)
             if ratio >= 0.9 and secs < MAX_SECS.get(name, 14):
                 break
+        if best is None:
+            print(f"[{name}] NOT SAVED: every take failed", flush=True)
+            continue
         ratio, pcm8, said, ok = best
         if not ok:
             print(f"[{name}] NOT SAVED: no take was both accurate (>=0.9) and short enough", flush=True)

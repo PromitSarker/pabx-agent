@@ -8,6 +8,7 @@ sys.path.insert(0, "/app")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 import websockets
 from sipbridge.app import CallInfo
+from sipbridge import resample
 from sipbridge.session import CallSession, FRAME_BYTES, KIND_AUDIO, GEMINI_WS_URL, MODEL
 from agent.db import get_connection
 from api import call_store
@@ -19,9 +20,12 @@ SCENARIOS = {
     "G": ["হ্যাঁ, বলুন।", "মুনাফা কত শতাংশ?", "ঠিক আছে, ধন্যবাদ, রাখছি।"],   # callee talks over the greeting after 2 s (before its question)
     "V": ["হ্যাঁ, বলুন।", "ঠিক আছে, ধন্যবাদ, রাখছি।"],   # callee says yes over the end of the greeting after 7 s (question already asked)
     "M": ["হ্যাঁ, বলুন।", "সর্বনিম্ন কত টাকা জমা দিতে হবে?"],   # then silence: the agent must answer, ask if there is more, and WAIT (no goodbye in the same turn)
+    "Y": ["হ্যাঁ, বলুন।"],   # yes, then silence after the pitch: the pre-opened Gemini session must be closed unused, cost = classifier only
     "N": ["না, আমার দরকার নেই।"],            # plain no -> recorded apology, no Gemini, no analysis
     "Q": ["আমাকে আর ফোন দেবেন না।"],           # no + do not call -> recorded apology, analysis still runs
     "P": ["হ্যাঁ, বলুন।", "মুনাফা কত শতাংশ?", "ঠিক আছে, ধন্যবাদ, রাখছি।"],   # the 2nd line is spoken 5 s into the recorded pitch (barge-in)
+    "W": ["হ্যাঁ, বলুন।", "উপায় কোন ব্যাংকের?", "আর এই ডিপিএসটা কোন ব্যাংক দিচ্ছে?", "ঠিক আছে, ধন্যবাদ, রাখছি।"],   # who owns upay / who provides the DPS
+    "L": ["হ্যালো?", "হ্যাঁ, বলুন।", "ঠিক আছে, ধন্যবাদ, রাখছি।"],   # reflexive "hello?" -> live agent must still answer (watchdog kick)
     "U": ["আপনি কে বলছেন?", "হ্যাঁ, বলুন।", "ঠিক আছে, ধন্যবাদ, রাখছি।"],   # unclear first reply -> live-agent fallback
     "H": ["হ্যাঁ, বলুন।", "আচ্ছা রেট কত হবে তাহলে?"],   # then the callee hangs up while the agent is answering
     "C": ["হ্যাঁ, বলুন।", "কত মাসের জন্য করা যায়?", "কিস্তি কীভাবে কাটবে?", "মাঝপথে টাকা তুললে কী হবে?", "নমিনি কি বদলানো যায়?", "ট্যাক্স কত কাটে?"],
@@ -48,7 +52,7 @@ async def tts(text):
     from agent.config import GEMINI_LIVE_MODEL
     for u in usages:
         record_usage(model=GEMINI_LIVE_MODEL, purpose="test_tts", channel="system", session_id="test-tts", is_test=True, raw=u, **tokens_from_live(u))
-    pcm8, _ = audioop.ratecv(b"".join(chunks), 2, 1, 24000, 8000, None)
+    pcm8 = resample.down3(b"".join(chunks))
     return [pcm8[i:i + FRAME_BYTES].ljust(FRAME_BYTES, b"\x00") for i in range(0, len(pcm8), FRAME_BYTES)]
 
 

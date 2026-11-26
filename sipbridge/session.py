@@ -3,6 +3,7 @@ import asyncio
 import audioop
 import base64
 import collections
+import contextlib
 import json
 import logging
 import math
@@ -21,7 +22,7 @@ from api import call_store
 from agent.live_tools import LIVE_TOOL_DECLARATIONS, LIVE_TOOLS_MAP
 from agent.upay import load_phone_facts
 from agent import post_call
-from sipbridge import intent
+from sipbridge import intent, resample
 from api.admin_store import admin_store
 from api.schemas import ConversationMessage
 from api.store import conversation_store
@@ -56,6 +57,7 @@ Date: {today}. Call purpose: {purpose} {callee_line}
 SPEAKING
 - Messages starting "[SYSTEM NOTE" come from the call system: follow them, never read them aloud.
 - Speak {language}. The line is noisy and your hearing of the LANGUAGE can be wrong: a garbled or foreign-sounding sentence is NOT a language change. Keep answering in {language} (or ask in {language} to repeat). Switch to another language only if the person asks you to or speaks several clear sentences in it, and never restart the greeting or the pitch because of a language change. In Bengali say upay=উপায়, MTB=এমটিবি, DPS=ডিপিএস.
+- Pace: speak at a natural conversational pace: clear and friendly, neither slow nor rushed.
 - Phone style: ONE short sentence per answer (two only if really needed), plain words, no lists or symbols. Speaking time costs money: never pad. Never repeat a fact unless asked. After you speak, stop and listen.
 - You are a virtual assistant: never claim to be human, no name. If you did not understand (noise, garbled), ask ONLY "দয়া করে আরেকবার বলবেন?" and stop; never answer what you did not understand. Exception: "সর্বনিম্ন কত" (the minimum monthly amount) is very often misheard as "অবনিম্ন", "সময় নম্বর" or similar: if the caller seems to ask "how much / minimum" about the deposit, answer with the four amounts (200, 500, 1,000 or 2,000 Taka a month) instead of asking again.
 
@@ -88,6 +90,14 @@ STEP1_CANNED = ('1. The greeting and permission question were ALREADY played to 
 STEP1_GREETING_CUT = ('1. A recorded greeting ("{greeting}") started playing but the person INTERRUPTED it after about {secs} seconds, so they may not '
                       "have heard its question. What you hear next is what they said. In ONE short sentence say who you are (upay's virtual "
                       "assistant, calling about the MTB Islamic DPS in the upay app) and ask if they can talk for a moment, then continue from step 2.")
+STEP1_RECONNECT = ("1-3. The call is already in progress: the greeting and the pitch were said earlier. Your connection was briefly interrupted by a "
+                   "technical problem and the person already heard a recorded apology for it. Recent conversation (speech-to-text, may contain errors):\n{recap}\n"
+                   "Continue naturally from here WITHOUT apologising again, greeting again or repeating the pitch: if the person asked something you had not "
+                   "answered yet, answer it in one short sentence; otherwise ask \"আর কিছু জানতে চান?\" and wait.")
+STEP1_PITCH_PRE = ('1-3. The greeting "{greeting}" was played as a recording and the person agreed to talk; then the recorded PITCH played: "{pitch}" '
+                   "(the person may have interrupted it part-way). Do NOT greet, ask permission or pitch again. What you hear next is their reaction "
+                   'to the pitch: a question or comment -> step 4 (if they only interrupted, answer what they said and do not repeat the pitch); '
+                   '"no questions" / thanks / okay -> step 5.')
 STEP1_PITCHED = ('1-3. The greeting "{greeting}" and then the PITCH were ALREADY played to the person as recordings; they agreed to talk. '
                  'The pitch was: "{pitch}". Do NOT greet, ask permission or pitch again. What you hear next is their reaction '
                  'to the pitch: a question or comment -> step 4; "no questions" / thanks / okay -> step 5.')
@@ -113,7 +123,11 @@ END_SENS = os.getenv("SIP_END_SENS", "END_SENSITIVITY_HIGH")
 PREFIX_MS = int(os.getenv("SIP_PREFIX_MS", "150"))
 SILENCE_MS = int(os.getenv("SIP_SILENCE_MS", "600"))
 SILENCE_NUDGE_S = float(os.getenv("SIP_SILENCE_NUDGE_S", "6"))      # quiet this long after the agent finished -> nudge
-EMPTY_TURN_NUDGE_S = float(os.getenv("SIP_EMPTY_TURN_NUDGE_S", "3.5"))  # agent turn ended with no speech -> nudge sooner
+EMPTY_TURN_NUDGE_S = float(os.getenv("SIP_EMPTY_TURN_NUDGE_S", "3.5"))
+MAX_RECONNECTS = int(os.getenv("SIP_MAX_RECONNECTS", "2"))           # Gemini dropped mid-call: reopen this many times before the recorded apology
+DEBUG_DROP_S = float(os.getenv("SIP_DEBUG_DROP_S", "0"))              # test only: close the first Gemini socket after N s (simulates 1011)
+PREBUF_BYTES = int(8000 * 2 * float(os.getenv("SIP_PLAY_PREBUF_S", "0.08")))   # cushion before an agent turn starts playing (network jitter)
+FIRST_REPLY_KICK_S = float(os.getenv("SIP_FIRST_REPLY_KICK_S", "3.0"))   # live session open, agent still has not spoken -> tell it to answer (max 2 times)  # agent turn ended with no speech -> nudge sooner
 MAX_NUDGES = int(os.getenv("SIP_MAX_NUDGES", "1"))
 MAX_CALL_S = int(os.getenv("SIP_MAX_CALL_SECONDS", "300"))
 SOFT_LIMIT_S = max(30, MAX_CALL_S - int(os.getenv("SIP_WRAPUP_BEFORE_S", "45")))
@@ -162,6 +176,7 @@ if PITCH_CANNED and (CANNED["pitch"]["text"] != PITCH_TEXT or CANNED["decline"][
 UTT_END_S = float(os.getenv("SIP_UTT_END_S", "0.7"))             # trailing silence that ends the callee's first reply
 UTT_MAX_S = float(os.getenv("SIP_UTT_MAX_S", "8"))               # longest first reply we wait for before classifying
 GREETING_Q_S = float(os.getenv("SIP_GREETING_Q_S", "2.5"))              # a greeting cut before this many seconds has not asked its question yet
+PRECONNECT = os.getenv("SIP_PRECONNECT", "1") != "0"          # open the Gemini session in the background while the recorded pitch plays (saves ~0.5 s on the first live answer)
 GREETING_GRACE_S = float(os.getenv("SIP_GREETING_GRACE_S", "1.5"))     # ignore speech during the first seconds of the greeting: the reflexive "hello?" on pickup
 INTENT_TIMEOUT_S = float(os.getenv("SIP_INTENT_TIMEOUT_S", "6"))      # classifier slower than this -> live agent fallback
 BARGE_FRAMES = int(os.getenv("SIP_BARGE_FRAMES", "12"))          # 12 loud 20 ms frames (0.24 s) while a recording plays = the person interrupts
@@ -219,6 +234,26 @@ def _build_hold_loop() -> bytes:
 
 HOLD_LOOP = _build_hold_loop()
 
+# ---- ringback before the greeting: after pickup the callee hears a normal phone ring for GREETING_RING_S, THEN the recorded greeting ----
+GREETING_RING_S = float(os.getenv("SIP_GREETING_RING_S", "2.0"))     # 0 = start the greeting immediately
+
+
+def _build_ringback(seconds: float) -> bytes:
+    """Classic ringback (425 Hz, 0.9 s ring / 0.2 s gap), cut to `seconds`, 8 kHz 16-bit mono (same format as out_buf), 20 ms fade at the end."""
+    rate, amp = 8000, 3500
+    total, out = int(rate * seconds), bytearray()
+    for i in range(total):
+        ph = (i / rate) % 1.1
+        if ph < 0.9:
+            env = min(1.0, ph / 0.02, (0.9 - ph) / 0.02, (total - i) / (rate * 0.02))
+            out += struct.pack("<h", int(amp * env * math.sin(2 * math.pi * 425 * i / rate)))
+        else:
+            out += b"\x00\x00"
+    return bytes(out)
+
+
+RINGBACK = _build_ringback(GREETING_RING_S) if GREETING_RING_S > 0 else b""
+
 
 class CallSession:
     def __init__(self, info, reader, writer, log):
@@ -235,7 +270,7 @@ class CallSession:
         self.agent_text = ""
         self.is_test = is_test_number(info.dialed)
         self.end_reason = "session error"
-        self._down_state = None
+        self._down = resample.Down3()            # 24 kHz agent voice -> 8 kHz phone line, low-passed (audioop.ratecv aliased: 'rattling')
         self.first_audio = asyncio.Event()  # set when Gemini's first speech chunk arrives
         self.tone_done = asyncio.Event()    # player() waits for this so tone and speech never overlap
         if not HOLD_TONE_ENABLED:
@@ -247,6 +282,15 @@ class CallSession:
         self.turn_audio_bytes = 0
         self._turn_tool = False
         self.last_turn_empty = False    # last agent turn produced no speech and no tool call
+        self.reconnects = 0             # Gemini session lost mid-call and reopened (Google 1011 'resource exhausted' etc.)
+        self._live_dropped = False
+        self.callee_hung_up = False
+        self.history = []               # (role, text) of what was said, for the recap a reconnected session gets
+        self._since_turn = collections.deque(maxlen=600)   # callee audio since the agent's last finished turn (12 s max)
+        self.underruns = 0              # player ran dry in the middle of an agent turn (a gap / click on the line)
+        self.live_open_ts = None        # when the Gemini session became ready (watchdog: agent silent since then -> kick)
+        self.kicks = 0
+        self.last_kick_ts = 0.0
         self.last_audio_out = now       # last time a speech frame went to the phone
         self.last_user_activity = now   # last time the callee's speech was transcribed
         self.last_voice_ts = 0.0        # last time callee audio energy was heard while the agent was silent
@@ -271,6 +315,8 @@ class CallSession:
         self._phrase = ("", 0.0)               # (name, seconds) of the last recorded phrase queued
         self._phrase_t0 = 0.0                  # monotonic time it was queued
         self.skip_analysis = False
+        self._pre_task = None                  # background task: Gemini session opened while the pitch plays -> (connection manager, socket, setup reply)
+        self._used_pre = False
         self.gen_open = False                 # a Gemini generation has started and its usage message has not arrived yet
         self.last_tokens = None                # token columns of the last recorded generation (basis for an estimate)
         self._usage_evt = asyncio.Event()
@@ -318,11 +364,74 @@ class CallSession:
         finally:
             self.tone_done.set()
 
+    # ---------- gemini connection (can be opened early, in the background) ----------
+    async def _open_live(self, pre: bool = False):
+        """Connect to Gemini Live and send the setup. Returns (connection manager, socket, setup reply). Costs no tokens by itself:
+        usage is billed per generated turn, and nothing is sent until the callee speaks."""
+        setup = await run_in_threadpool(self._build_setup, pre)
+        cm = websockets.connect(GEMINI_WS_URL, max_size=None)
+        gws = await cm.__aenter__()
+        try:
+            await gws.send(json.dumps(setup))
+            resp = await gws.recv()
+        except BaseException:
+            await cm.__aexit__(None, None, None)
+            raise
+        return cm, gws, resp
+
+    @contextlib.asynccontextmanager
+    async def _live_connection(self):
+        """Yields (socket, setup reply): the pre-opened session if it is healthy, else a fresh one built for the current stage."""
+        cm = gws = resp = None
+        task, self._pre_task = self._pre_task, None
+        if task is not None:
+            try:
+                cm, gws, resp = await asyncio.wait_for(asyncio.shield(task), 8)
+                await asyncio.wait_for(await gws.ping(), 2)           # still alive after the idle wait?
+                self._used_pre = True
+            except BaseException as e:
+                if isinstance(e, (asyncio.CancelledError, KeyboardInterrupt)):
+                    raise
+                self.log.warning("pre-connected Gemini session unusable (%r): opening a fresh one", e)
+                if cm is not None:
+                    with contextlib.suppress(Exception):
+                        await cm.__aexit__(None, None, None)
+                cm = gws = resp = None
+                task.cancel()
+        if cm is None:
+            cm, gws, resp = await self._open_live(pre=False)
+        try:
+            yield gws, resp
+        finally:
+            with contextlib.suppress(Exception):
+                await cm.__aexit__(None, None, None)
+
+    async def _drop_preconnect(self):
+        """The call ended without needing the pre-opened session: close it."""
+        task, self._pre_task = self._pre_task, None
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+            return
+        if task.cancelled() or task.exception():
+            return
+        with contextlib.suppress(Exception):
+            await task.result()[0].__aexit__(None, None, None)
+
     # ---------- setup ----------
-    def _step1(self) -> str:
+    def _recap(self) -> str:
+        lines = [("Person: " if r == "user" else "Agent: ") + t.strip().replace("\n", " ")[:160] for r, t in self.history[-6:]]
+        return "\n".join(lines) or "(nothing yet)"
+
+    def _step1(self, pre: bool = False) -> str:
+        if self.reconnects:
+            return STEP1_RECONNECT.format(recap=self._recap())
         if not CANNED:
             return STEP1_LIVE
         g = CANNED["greeting"]["text"]
+        if pre:           # built while the pitch is still playing: covers both "played in full" and "interrupted"
+            return STEP1_PITCH_PRE.format(greeting=g, pitch=PITCH_TEXT)
         if self.stage == "pitched":
             return STEP1_PITCHED.format(greeting=g, pitch=PITCH_TEXT)
         if self.stage == "pitch_cut":
@@ -331,14 +440,14 @@ class CallSession:
             return STEP1_GREETING_CUT.format(greeting=g, secs=max(1, round(self.greeting_cut_s)))
         return STEP1_CANNED.format(greeting=g)
 
-    def _build_setup(self):
+    def _build_setup(self, pre: bool = False):
         lang = self.info.language
         cfg = LANGUAGES.get(lang, LANGUAGES["Bengali"])
         callee = f"The person's name is {self.info.name}." if self.info.name else "You do not know the person's name; do not invent one."
         prompt = PHONE_PROMPT.format(
             today=datetime.now().strftime("%Y-%m-%d (%A)"), purpose=self.info.purpose,
             callee_line=callee, language=lang, facts=load_phone_facts(),
-            step1=self._step1(),
+            step1=self._step1(pre),
         )
         return {
             "setup": {
@@ -401,48 +510,65 @@ class CallSession:
             if verdict != "speech":
                 self.log.info("call ending: %s (no Gemini session was opened)", self.end_reason)
             else:
-                setup = await run_in_threadpool(self._build_setup)
-                async with websockets.connect(GEMINI_WS_URL, max_size=None) as gws:
-                    await gws.send(json.dumps(setup))
-                    resp = await gws.recv()
-                    self.log.info("gemini setup ok: %s", str(resp)[:120])
-                    if not CANNED:  # without recordings the model itself must speak first
-                        await gws.send(json.dumps({"clientContent": {"turns": [{"role": "user", "parts": [{
-                            "text": "The person has just answered the phone. Start the call now."}]}], "turnComplete": True}}))
-                    self.last_user_activity = time.monotonic()
-                    names = ("phone_to_gemini", "gemini_to_phone", "stop_event", "watchdog")
-                    tasks = [asyncio.create_task(c, name=n) for n, c in zip(names, (
-                        self.phone_to_gemini(gws), self.gemini_to_phone(gws), self.stop.wait(), self.watchdog(gws)))]
-                    tasks.append(self.player_task)
-                    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-                    for t in done:
-                        why = {"phone_to_gemini": "callee hung up or phone link closed",
-                               "gemini_to_phone": "Gemini closed the session",
-                               "player": "audio player stopped",
-                               "stop_event": "call ended by the watchdog (farewell spoken / no response / time limit)",
-                               "watchdog": "watchdog stopped unexpectedly"}[t.get_name()]
-                        exc = t.exception()
-                        self.end_reason = why
-                        self.log.info("call ending: %s%s", why, f" [{exc!r}]" if exc else "")
-                    if self.gen_open and not any(t.get_name() == "gemini_to_phone" for t in done):
-                        # the call ended mid-generation: Google still bills it, so wait briefly for its usage message
-                        try:
-                            await asyncio.wait_for(self._usage_evt.wait(), 10.0)
-                            self.log.info("recorded the usage of the generation that was in progress at hang-up")
-                        except asyncio.TimeoutError:
-                            await self._record_partial_generation()
-                    for t in pending:
-                        if t is not self.player_task:
-                            t.cancel()
-                    for t in done:
-                        if t.exception() and not isinstance(t.exception(), (asyncio.IncompleteReadError, websockets.ConnectionClosed)):
-                            self.log.error("task failed: %r", t.exception())
+                while True:
+                    self._live_dropped = False
+                    try:
+                        async with self._live_connection() as (gws, resp):
+                            self.log.info("gemini setup ok: %s%s", str(resp)[:120], " [pre-connected]" if self._used_pre else "")
+                            if not CANNED and not self.reconnects:  # without recordings the model itself must speak first
+                                await gws.send(json.dumps({"clientContent": {"turns": [{"role": "user", "parts": [{
+                                    "text": "The person has just answered the phone. Start the call now."}]}], "turnComplete": True}}))
+                            self.last_user_activity = time.monotonic()
+                            self.live_open_ts = time.monotonic()
+                            if self.reconnects:
+                                loud = sum(1 for f in self.preroll if len(f) >= 2 and audioop.rms(f, 2) > LAZY_MIN_RMS)
+                                if loud < 10:     # nothing the person said is waiting for an answer: tell the model to carry on
+                                    await self._system_note(gws, "The connection was restored. Continue the call now as instructed in step 1.")
+                            names = ("phone_to_gemini", "gemini_to_phone", "stop_event", "watchdog")
+                            tasks = [asyncio.create_task(c, name=n) for n, c in zip(names, (
+                                self.phone_to_gemini(gws), self.gemini_to_phone(gws), self.stop.wait(), self.watchdog(gws)))]
+                            if DEBUG_DROP_S and not self.reconnects:
+                                tasks.append(asyncio.create_task(self._debug_drop(gws), name="debug_drop"))
+                            tasks.append(self.player_task)
+                            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                            self._live_dropped = (any(t.get_name() == "gemini_to_phone" for t in done) and not self.callee_hung_up
+                                                  and not self.hangup_requested and not self.stop.is_set() and not self.closing)
+                            for t in done:
+                                why = {"phone_to_gemini": "callee hung up or phone link closed",
+                                       "gemini_to_phone": "Gemini closed the session",
+                                       "player": "audio player stopped",
+                                       "stop_event": "call ended by the watchdog (farewell spoken / no response / time limit)",
+                                       "watchdog": "watchdog stopped unexpectedly", "debug_drop": "debug drop"}[t.get_name()]
+                                exc = t.exception()
+                                self.end_reason = why
+                                self.log.info("call ending: %s%s", why, f" [{exc!r}]" if exc else "")
+                            if self.gen_open and not any(t.get_name() == "gemini_to_phone" for t in done):
+                                # the call ended mid-generation: Google still bills it, so wait briefly for its usage message
+                                try:
+                                    await asyncio.wait_for(self._usage_evt.wait(), 10.0)
+                                    self.log.info("recorded the usage of the generation that was in progress at hang-up")
+                                except asyncio.TimeoutError:
+                                    await self._record_partial_generation()
+                            for t in pending:
+                                if t is not self.player_task:
+                                    t.cancel()
+                            for t in done:
+                                if t.exception() and not isinstance(t.exception(), (asyncio.IncompleteReadError, websockets.ConnectionClosed)):
+                                    self.log.error("task failed: %r", t.exception())
+                    except (websockets.WebSocketException, OSError, asyncio.TimeoutError) as e:
+                        if not self.reconnects:
+                            raise
+                        self.log.warning("reconnect attempt failed: %r", e)
+                        self._live_dropped = True
+                    if not await self._prepare_reconnect():
+                        break
         except Exception:
             self.log.exception("call session error")
         finally:
             for t in (tone_task, self.read_task, self.player_task):
                 if t:
                     t.cancel()
+            await self._drop_preconnect()
             await self._flush_transcript()
             if self._rec:
                 self._rec.close()
@@ -457,6 +583,40 @@ class CallSession:
                 pass
             self.writer.close()
             self.log.info("call finished after %.1fs", dur)
+
+    async def _debug_drop(self, gws):
+        await asyncio.sleep(DEBUG_DROP_S)
+        self.log.warning("DEBUG: closing the Gemini socket on purpose (SIP_DEBUG_DROP_S)")
+        await gws.close(code=1011, reason="debug drop")
+        await asyncio.sleep(3600)
+
+    async def _prepare_reconnect(self) -> bool:
+        """Gemini closed the session while the call was still going (Google quota / capacity 1011). Returns True to reopen it with a
+        recap and the callee's unanswered audio; after MAX_RECONNECTS failures plays a recorded apology and ends the call."""
+        if not self._live_dropped:
+            return False
+        if self.reconnects >= MAX_RECONNECTS:
+            self.log.error("Gemini session lost %d times: recorded apology and hang-up", self.reconnects)
+            self.queue_audio("lineproblem")
+            await self._wait_drained(timeout=15.0)
+            self.outcome = "technical_problem"
+            self.end_reason = "Gemini session could not be restored (recorded apology played)"
+            with contextlib.suppress(Exception):
+                await run_in_threadpool(LIVE_TOOLS_MAP["save_collected_information"], {"data": {
+                    "Summary": "The call was cut short by a technical problem on our side; the person was told customer service will call back.",
+                    "Follow-up Needed": "Call this person back", "Call Outcome": "technical_problem"}, "session_id": self.cid})
+            return False
+        self.reconnects += 1
+        self.log.warning("Gemini session lost mid-call: reconnecting (%d/%d), %.1fs of callee audio carried over",
+                         self.reconnects, MAX_RECONNECTS, len(self._since_turn) * 0.02)
+        self.turn_open, self.turn_audio_bytes, self.gen_open = False, 0, False
+        self._down.reset()
+        self.preroll = collections.deque(self._since_turn)
+        self._since_turn.clear()
+        self.queue_audio("reconnect")          # recorded "sorry, a small line problem" covers the reconnect gap
+        if self.reconnects > 1:
+            await asyncio.sleep(1.5)           # Google is still limiting us: give it a moment
+        return True
 
     # ---------- frames from the phone ----------
     async def _read_loop(self):
@@ -475,13 +635,16 @@ class CallSession:
             self._q.put_nowait((KIND_HANGUP, b""))
 
     # ---------- pre-recorded audio ----------
-    def queue_audio(self, name: str) -> float:
+    def queue_audio(self, name: str, ring: bool = False) -> float:
         c = CANNED.get(name)
         if not c:
             return 0.0
+        lead = len(RINGBACK) / 16000.0 if (ring and RINGBACK) else 0.0
+        if lead:
+            self.out_buf.extend(RINGBACK)            # ringing first, then the phrase
         self.out_buf.extend(c["pcm"])
         self._phrase = (name, len(c["pcm"]) / 16000.0)
-        self._phrase_t0 = time.monotonic()
+        self._phrase_t0 = time.monotonic() + lead    # the ring counts as grace time: a reflexive "hello?" while it rings must not cut anything
         return len(c["pcm"]) / 16000.0
 
     async def _wait_drained(self, extra: float = 0.4, timeout: float = 20.0):
@@ -494,7 +657,7 @@ class CallSession:
         """Phase A: nothing is sent to Gemini. Plays the recorded `first` phrase (none if ""), then waits for the callee to speak.
         Returns "speech" (open the Gemini session), "no_response" or "hangup" (call is over, nothing was billed by Gemini)."""
         if first:
-            self.queue_audio(first)
+            self.queue_audio(first, ring=(first == "greeting"))
         t0 = time.monotonic()
         rms_hist = collections.deque(maxlen=250)     # 5 s of recent callee energy while the agent is quiet -> noise floor
         speech_frames, nudge, peak, silent_since = 0, 0, 0, None
@@ -561,6 +724,7 @@ class CallSession:
                     return await self._prelive_goodbye("still silent after the nudges", peak, rms_hist)
 
     async def _log_msg(self, role: str, text: str):
+        self.history.append((role, text))
         try:
             await run_in_threadpool(conversation_store.append, self.cid, ConversationMessage(role=role, content=text, timestamp=datetime.now()))
         except Exception as e:
@@ -642,6 +806,8 @@ class CallSession:
         # ---- clear yes: recorded pitch, with barge-in ----
         await self._log_msg("assistant", PITCH_TEXT)
         self.stage = "pitched"
+        if PRECONNECT and self._pre_task is None:
+            self._pre_task = asyncio.create_task(self._open_live(pre=True))     # ready by the time the callee reacts to the pitch
         outcome = await self._play_pitch()
         if outcome == "hangup":
             return "hangup"
@@ -694,7 +860,9 @@ class CallSession:
 
     # ---------- phone -> gemini ----------
     async def _send_audio(self, gws, payload: bytes, state):
-        pcm16, state = audioop.ratecv(payload, 2, 1, 8000, 16000, state)
+        if state is None:
+            state = resample.Up2()
+        pcm16 = state.process(payload)
         await gws.send(json.dumps({"realtimeInput": {"audio": {
             "data": base64.b64encode(pcm16).decode(), "mimeType": "audio/pcm;rate=16000"}}}))
         return state
@@ -722,6 +890,7 @@ class CallSession:
             else:
                 kind, payload = await self._q.get()
             if kind == KIND_AUDIO:
+                self._since_turn.append(payload)
                 rms = audioop.rms(payload, 2) if len(payload) >= 2 else 0
                 agent_busy = self.turn_open or bool(self.out_buf)
                 loud = vad.update(rms, agent_busy)
@@ -750,6 +919,7 @@ class CallSession:
                 if MANUAL_VAD and speaking:
                     await gws.send(json.dumps({"realtimeInput": {"activityEnd": {}}}))
                 self.log.info("callee hung up")
+                self.callee_hung_up = True
                 return
             elif kind == KIND_ERROR:
                 self.log.warning("audiosocket error frame: %r", payload)
@@ -772,7 +942,7 @@ class CallSession:
             if sc:
                 if sc.get("interrupted"):
                     self.out_buf.clear()
-                    self._down_state = None
+                    self._down.reset()
                     self.turn_open = False
                     self.turn_audio_bytes = 0
                     self.last_user_activity = time.monotonic()
@@ -809,7 +979,7 @@ class CallSession:
                                 self.log.info("latency: %.2fs (callee last audible speech -> first agent audio)", lat)
                                 self._lat_armed = False
                         self.turn_audio_bytes += len(pcm24)
-                        pcm8, self._down_state = audioop.ratecv(pcm24, 2, 1, 24000, 8000, self._down_state)
+                        pcm8 = self._down.process(pcm24)
                         self.out_buf.extend(pcm8)
                 if sc.get("turnComplete"):
                     self.last_turn_empty = self.turn_audio_bytes == 0 and not self._turn_tool and not self.hangup_requested
@@ -822,6 +992,10 @@ class CallSession:
                     self.turn_audio_bytes = 0
                     self._turn_tool = False
                     self.turn_done.set()
+                    self._since_turn.clear()
+                    if self.underruns:
+                        self.log.info("player: %d underrun frame(s) (padded with silence) in the last agent turn", self.underruns)
+                        self.underruns = 0
                     await self._flush_transcript()
 
             tc = data.get("toolCall")
@@ -855,11 +1029,29 @@ class CallSession:
     async def player(self):
         await self.tone_done.wait()  # hold tone (if any) finishes before speech is written
         next_t = time.monotonic()
+        started, first_ts, starved = False, None, None
         while True:
             if not self.out_buf:
                 next_t = time.monotonic()
+                started, first_ts, starved = False, None, None
                 await asyncio.sleep(0.01)
                 continue
+            if self.turn_open:      # live agent speech arrives in bursts: keep a small cushion so jitter does not become gaps / clicks
+                now = time.monotonic()
+                if not started:
+                    first_ts = first_ts or now
+                    if len(self.out_buf) < PREBUF_BYTES and now - first_ts < 0.15:
+                        await asyncio.sleep(0.005)
+                        continue
+                    started, next_t = True, time.monotonic()
+                elif len(self.out_buf) < FRAME_BYTES:
+                    starved = starved or now
+                    if now - starved < 0.06:        # wait for the next chunk instead of padding the frame with silence
+                        await asyncio.sleep(0.005)
+                        continue
+                    self.underruns += 1
+                else:
+                    starved = None
             chunk = bytes(self.out_buf[:FRAME_BYTES])
             del self.out_buf[:FRAME_BYTES]
             self.last_audio_out = time.monotonic()
@@ -884,7 +1076,21 @@ class CallSession:
         while True:
             await asyncio.sleep(0.5)
             try:
-                if not self.first_audio.is_set() or not self.tone_done.is_set() or self.hangup_requested:
+                if self.hangup_requested or not self.tone_done.is_set():
+                    continue
+                if not self.first_audio.is_set():
+                    # The live agent was opened (reply was unclear / pitch cut) but has produced NO speech yet: the model sometimes
+                    # treats a short "hello?" as noise and waits forever, and the nudges below only run after its first speech.
+                    now = time.monotonic()
+                    if (self.live_open_ts and self.kicks < 2 and not self.turn_open and not self.out_buf
+                            and now - max(self.live_open_ts, self.last_voice_ts, self.last_kick_ts) >= FIRST_REPLY_KICK_S):
+                        self.kicks += 1
+                        self.last_kick_ts = now
+                        self.log.info("watchdog: live agent silent %.1fs after the session opened, asking it to answer (%d/2)",
+                                      now - self.live_open_ts, self.kicks)
+                        await self._system_note(gws, "The person has answered the phone and may be waiting. Reply to them NOW in Bengali: "
+                                                     "if they said hello or something unclear, answer politely in one short sentence "
+                                                     "(you are calling from upay) and continue with your current step. Never stay silent.")
                     continue
                 now = time.monotonic()
                 elapsed = now - self.t0
@@ -1012,6 +1218,7 @@ class CallSession:
             text = getattr(self, attr).strip()
             setattr(self, attr, "")
             if text:
+                self.history.append((role, text))
                 try:
                     await run_in_threadpool(conversation_store.append, self.cid,
                                             ConversationMessage(role=role, content=text, timestamp=datetime.now()))

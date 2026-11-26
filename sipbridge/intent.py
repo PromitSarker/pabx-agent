@@ -9,6 +9,7 @@ import io
 import json
 import os
 import wave
+from sipbridge import resample
 
 from agent.config import GEMINI_API_KEY
 from agent.usage import record_usage
@@ -33,7 +34,7 @@ Output nothing else (no transcript, no explanation): a short answer is faster.""
 
 
 def _wav16k(pcm8: bytes) -> bytes:
-    pcm16, _ = audioop.ratecv(pcm8, 2, 1, 8000, 16000, None)
+    pcm16 = resample.up2(pcm8)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1)
