@@ -16,6 +16,13 @@ SCENARIOS = {
     "A": ["হ্যাঁ, বলুন।", "মুনাফা কত শতাংশ?", "ঠিক আছে, ধন্যবাদ, রাখছি।"],
     "B": ["আমি এখন ব্যস্ত, আর ফোন দেবেন না।"],
     "D": [],
+    "G": ["হ্যাঁ, বলুন।", "মুনাফা কত শতাংশ?", "ঠিক আছে, ধন্যবাদ, রাখছি।"],   # callee talks over the greeting after 2 s (before its question)
+    "V": ["হ্যাঁ, বলুন।", "ঠিক আছে, ধন্যবাদ, রাখছি।"],   # callee says yes over the end of the greeting after 7 s (question already asked)
+    "M": ["হ্যাঁ, বলুন।", "সর্বনিম্ন কত টাকা জমা দিতে হবে?"],   # then silence: the agent must answer, ask if there is more, and WAIT (no goodbye in the same turn)
+    "N": ["না, আমার দরকার নেই।"],            # plain no -> recorded apology, no Gemini, no analysis
+    "Q": ["আমাকে আর ফোন দেবেন না।"],           # no + do not call -> recorded apology, analysis still runs
+    "P": ["হ্যাঁ, বলুন।", "মুনাফা কত শতাংশ?", "ঠিক আছে, ধন্যবাদ, রাখছি।"],   # the 2nd line is spoken 5 s into the recorded pitch (barge-in)
+    "U": ["আপনি কে বলছেন?", "হ্যাঁ, বলুন।", "ঠিক আছে, ধন্যবাদ, রাখছি।"],   # unclear first reply -> live-agent fallback
     "H": ["হ্যাঁ, বলুন।", "আচ্ছা রেট কত হবে তাহলে?"],   # then the callee hangs up while the agent is answering
     "C": ["হ্যাঁ, বলুন।", "কত মাসের জন্য করা যায়?", "কিস্তি কীভাবে কাটবে?", "মাঝপথে টাকা তুললে কী হবে?", "নমিনি কি বদলানো যায়?", "ট্যাক্স কত কাটে?"],
 }
@@ -69,9 +76,10 @@ class ScriptedReader:
                     self.hangup_at = time.time() + 1.5          # hang up 1.5 s after the last question ends
             return f
         s = self.session
-        if s and self.clips and (s.first_audio.is_set() or getattr(s, "greeting_played", False)) and not s.turn_open and not s.out_buf:
+        barge = (os.getenv("SCENARIO") == "P" and s and getattr(s, "stage", "") == "pitched" and bool(s.out_buf) and len(self.clips) == 2) or (os.getenv("SCENARIO") in ("G", "V") and s and getattr(s, "stage", "") == "greeted" and bool(s.out_buf) and len(self.clips) == (3 if os.getenv("SCENARIO") == "G" else 2) and not self.cur)
+        if s and self.clips and (barge or ((s.first_audio.is_set() or getattr(s, "greeting_played", False)) and not s.turn_open and not s.out_buf and not (os.getenv("SCENARIO") == "P" and len(self.clips) == 2))):
             if self.armed_at is None: self.armed_at = time.time()
-            if time.time() - self.armed_at > 1.2:
+            if time.time() - self.armed_at > ((2.0 if os.getenv("SCENARIO") == "G" else 7.0 if os.getenv("SCENARIO") == "V" else 5.0) if barge else 1.2):
                 self.cur, self.armed_at = self.clips.pop(0), None
         else:
             self.armed_at = None

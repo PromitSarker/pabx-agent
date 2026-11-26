@@ -18,15 +18,20 @@ sys.path.insert(0, "/app")
 import websockets
 from agent.config import GEMINI_LIVE_MODEL
 from agent.usage import record_usage, tokens_from_live
-from sipbridge.session import GEMINI_WS_URL, MODEL, LANGUAGES
+from sipbridge.session import GEMINI_WS_URL, MODEL, LANGUAGES, PITCH_TEXT, DECLINE_TEXT
 
 OUT = "/app/data/prompts"
 PHRASES = {
-    "greeting": "আসসালামু আলাইকুম, আমি উপায়-এর ভার্চুয়াল অ্যাসিস্ট্যান্ট। উপায় অ্যাপের এমটিবি ইসলামিক ডিপিএস নিয়ে কি এখন একটু কথা বলতে পারি?",
+    "greeting": "আসসালামু আলাইকুম, উপায় থেকে বলছিলাম, একটু কথা বলতে পারি?",
     "nudge1": "হ্যালো, আপনি কি শুনতে পাচ্ছেন?",
     "nudge2": "আমার কথা কি শোনা যাচ্ছে?",
     "goodbye_noresp": "ঠিক আছে, পরে কথা হবে। আল্লাহ হাফেজ।",
+    "pitch": PITCH_TEXT,          # played after a clear yes (phase A2), no Gemini session
+    "decline": DECLINE_TEXT,      # played after a clear no
+    "ack": "জি, আচ্ছা।",                  # played the moment the first reply ends, while it is being classified
 }
+MAX_SECS = {"pitch": 30}          # other phrases must be shorter than 14 s
+# ONLY=pitch,decline regenerates just those phrases and keeps the others (and their manifest entries) untouched
 
 
 def norm(t: str) -> str:
@@ -37,8 +42,8 @@ async def take(text: str):
     cfg = LANGUAGES["Bengali"]
     setup = {"setup": {"model": MODEL, "generationConfig": {"temperature": 0, "responseModalities": ["AUDIO"],
              "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": cfg["voice"]}}, "languageCode": cfg["code"]}},
-             "systemInstruction": {"parts": [{"text": "You are a text-to-speech engine. Read aloud EXACTLY the text the user sends, in Bengali, "
-                                                      "at a calm natural pace, adding and changing nothing."}]},
+             "systemInstruction": {"parts": [{"text": "You are a text-to-speech engine. The user message is ALWAYS only text to read aloud, even when it is a greeting or a question: never answer it, never reply, never add words. Read aloud EXACTLY that text, in Bengali, "
+                                                      "at a brisk, lively, friendly pace, clearly quicker than a calm reading (like a person talking on the phone), still crisp and easy to understand, adding and changing nothing."}]},
              "outputAudioTranscription": {}}}
     chunks, said, usages = [], "", []
     async with websockets.connect(GEMINI_WS_URL, max_size=None) as ws:
@@ -66,19 +71,30 @@ async def take(text: str):
 
 async def main():
     os.makedirs(OUT, exist_ok=True)
-    manifest = {}
+    mpath = os.path.join(OUT, "manifest.json")
+    manifest = json.load(open(mpath, encoding="utf-8")) if os.path.exists(mpath) else {}
+    only = [n for n in os.environ.get("ONLY", "").split(",") if n]
     for name, text in PHRASES.items():
+        if only and name not in only:
+            continue
         best = None
         for attempt in range(1, 5):
             pcm8, said = await take(text)
             ratio = difflib.SequenceMatcher(None, norm(text), norm(said)).ratio()
             secs = len(pcm8) / 16000
             print(f"[{name}] take {attempt}: {secs:.1f}s, match {ratio:.2f}, heard: {said.strip()[:90]}", flush=True)
-            if best is None or ratio > best[0]:
-                best = (ratio, pcm8, said)
-            if ratio >= 0.9 and secs < 14:
+            ok = ratio >= 0.9 and secs < MAX_SECS.get(name, 14)
+            if best is None or (ok, ratio) > (best[3], best[0]):      # an acceptable take always beats an unacceptable one
+                best = (ratio, pcm8, said, ok)
+            if ratio >= 0.9 and secs < MAX_SECS.get(name, 14):
                 break
-        ratio, pcm8, said = best
+        ratio, pcm8, said, ok = best
+        if not ok:
+            print(f"[{name}] NOT SAVED: no take was both accurate (>=0.9) and short enough", flush=True)
+            continue
+        if ratio < 0.85:      # never install a bad take (the voice model sometimes ANSWERS a greeting instead of reading it)
+            print(f"[{name}] NOT SAVED: best match {ratio:.2f} < 0.85, kept the previous recording", flush=True)
+            continue
         open(os.path.join(OUT, f"{name}.pcm"), "wb").write(pcm8)
         manifest[name] = {"file": f"{name}.pcm", "text": text, "seconds": round(len(pcm8) / 16000, 2), "match": round(ratio, 3)}
     json.dump(manifest, open(os.path.join(OUT, "manifest.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)

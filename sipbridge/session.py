@@ -4,6 +4,7 @@ import audioop
 import base64
 import collections
 import json
+import logging
 import math
 import os
 import re
@@ -20,6 +21,7 @@ from api import call_store
 from agent.live_tools import LIVE_TOOL_DECLARATIONS, LIVE_TOOLS_MAP
 from agent.upay import load_phone_facts
 from agent import post_call
+from sipbridge import intent
 from api.admin_store import admin_store
 from api.schemas import ConversationMessage
 from api.store import conversation_store
@@ -53,17 +55,17 @@ Date: {today}. Call purpose: {purpose} {callee_line}
 
 SPEAKING
 - Messages starting "[SYSTEM NOTE" come from the call system: follow them, never read them aloud.
-- Speak {language}; if the person replies in another language (e.g. English) switch to it. In Bengali say upay=উপায়, MTB=এমটিবি, DPS=ডিপিএস.
+- Speak {language}. The line is noisy and your hearing of the LANGUAGE can be wrong: a garbled or foreign-sounding sentence is NOT a language change. Keep answering in {language} (or ask in {language} to repeat). Switch to another language only if the person asks you to or speaks several clear sentences in it, and never restart the greeting or the pitch because of a language change. In Bengali say upay=উপায়, MTB=এমটিবি, DPS=ডিপিএস.
 - Phone style: ONE short sentence per answer (two only if really needed), plain words, no lists or symbols. Speaking time costs money: never pad. Never repeat a fact unless asked. After you speak, stop and listen.
-- You are a virtual assistant: never claim to be human, no name. If you did not understand (noise, garbled), ask them to repeat; never answer what you did not understand.
+- You are a virtual assistant: never claim to be human, no name. If you did not understand (noise, garbled), ask ONLY "দয়া করে আরেকবার বলবেন?" and stop; never answer what you did not understand. Exception: "সর্বনিম্ন কত" (the minimum monthly amount) is very often misheard as "অবনিম্ন", "সময় নম্বর" or similar: if the caller seems to ask "how much / minimum" about the deposit, answer with the four amounts (200, 500, 1,000 or 2,000 Taka a month) instead of asking again.
 
 FLOW
 {step1}
 2. Their answer: YES ("yes", "বলুন", "হ্যাঁ") -> step 3. NO / busy / not interested / wrong number / do not call again -> brief apology, then the FAREWELL. CALL LATER -> repeat the time they prefer, say someone will contact them then, then the FAREWELL. Unclear ("hello?", "who is this?") -> one short sentence on who you are, then ask permission again.
-3. Pitch, only after a clear yes. Say exactly these TWO sentences in natural Bengali (nothing added): "এটি মিউচুয়াল ট্রাস্ট ব্যাংকের শরীয়াহভিত্তিক মাসিক সঞ্চয় স্কিম, যা উপায় অ্যাপেই খোলা যায়; মাসে ২০০, ৫০০, ১,০০০ বা ২,০০০ টাকা করে জমা হয়, কোনো কাগজপত্র বা ফি লাগে না। মেয়াদ শেষে টাকা ও মুনাফা আপনার উপায় অ্যাকাউন্টে ফিরে আসে - আপনার কি কোনো প্রশ্ন আছে?" (translate only if they speak another language). The monthly amount is ONLY one of those four; never say any amount is possible.
-4. Questions: answer ONLY from FACTS, in one sentence. If they want to start: say they can open it in the upay app (outcome interested). If they tell you their name, use it. Never say an application is approved.
-5. Close: thank them, then the FAREWELL.
-FAREWELL: finish EVERY call with exactly this sentence, which ends the call, and say nothing after it: "ভালো থাকবেন, আল্লাহ হাফেজ।" (an equivalent farewell if they speak another language). Never use it before the call is really over.
+3. Pitch, only after a clear yes. Say exactly these TWO sentences in natural Bengali (nothing added): "উপায় অ্যাপের এমটিবি ইসলামিক ডিপিএস হলো মিউচুয়াল ট্রাস্ট ব্যাংকের শরীয়াহভিত্তিক মাসিক সঞ্চয় স্কিম, যা অ্যাপেই খোলা যায়; মাসে ২০০, ৫০০, ১,০০০ বা ২,০০০ টাকা করে জমা হয়, কোনো কাগজপত্র বা ফি লাগে না। মেয়াদ শেষে টাকা ও মুনাফা আপনার উপায় অ্যাকাউন্টে ফিরে আসে - আপনার কি কোনো প্রশ্ন আছে?" (translate only if they speak another language). The monthly amount is ONLY one of those four; never say any amount is possible.
+4. Questions (the pitch is said ONCE per call, never repeat it; if asked again what this is, one sentence): answer ONLY from FACTS, in one sentence, then STOP and listen (you may add the short question "আর কিছু জানতে চান?"). If they want to start: say they can open it in the upay app (outcome interested). If they tell you their name, use it. Never say an application is approved.
+5. Close ONLY when the person has clearly finished: said they have no more questions, thanks, okay/bye, declined, or asked to be called later. Then thank them briefly and say the FAREWELL. If you are unsure whether they are done, ask and wait.
+FAREWELL: finish EVERY call with exactly this sentence, which ends the call, and say nothing after it: "ভালো থাকবেন, আল্লাহ হাফেজ।" (an equivalent farewell if they speak another language). NEVER say it in the same turn as a question, and never right after asking whether they have more questions: after any question you ask, stop speaking and wait for their answer, even if they stay quiet for a few seconds. Never use it before the call is really over.
 
 MISSING ANSWERS (very common: profit rate, percentage, "how much will I get at maturity")
 These are NOT in FACTS. Say once, in {language}: restate their question in a few words, say you cannot give that figure (profit is paid as per bank policy), that you have noted their question, and that a customer service person will contact them soon. Then ask if there is anything else. The same applies to other banks or products, their own account, or anything outside FACTS. Never guess or estimate, never send them elsewhere ("ask the bank", "check the app"), and give no phone number, email or website. Always give this handoff instead of an answer.
@@ -83,6 +85,15 @@ STEP1_LIVE = ("1. First turn: greet, say you are upay's virtual assistant callin
               "and ask if they have a few minutes. Nothing more, then wait.")
 STEP1_CANNED = ('1. The greeting and permission question were ALREADY played to the person as a recording: "{greeting}". '
                 "Do NOT greet or ask again. What you hear next is their reply to it: continue from step 2.")
+STEP1_GREETING_CUT = ('1. A recorded greeting ("{greeting}") started playing but the person INTERRUPTED it after about {secs} seconds, so they may not '
+                      "have heard its question. What you hear next is what they said. In ONE short sentence say who you are (upay's virtual "
+                      "assistant, calling about the MTB Islamic DPS in the upay app) and ask if they can talk for a moment, then continue from step 2.")
+STEP1_PITCHED = ('1-3. The greeting "{greeting}" and then the PITCH were ALREADY played to the person as recordings; they agreed to talk. '
+                 'The pitch was: "{pitch}". Do NOT greet, ask permission or pitch again. What you hear next is their reaction '
+                 'to the pitch: a question or comment -> step 4; "no questions" / thanks / okay -> step 5.')
+STEP1_PITCH_CUT = ('1-3. The greeting "{greeting}" was played as a recording and the person agreed to talk. The recorded PITCH ("{pitch}") started '
+                   'but the person INTERRUPTED it after about {secs} seconds. What you hear next is what they said: answer it in one sentence '
+                   "(step 4). Do not repeat the whole pitch; if they ask what this is, give its essence in one sentence.")
 
 
 async def read_frame(reader):
@@ -136,6 +147,25 @@ def load_canned() -> dict:
 
 
 CANNED = load_canned()
+
+# ---- recorded pitch + recorded apology (phase A2): the callee's first reply is classified by one cheap text-model call, so a clear
+# "yes" gets the recorded pitch and a clear "no" gets the recorded apology, both without a paid Gemini Live session. Anything else
+# (later / unclear / other language / error) falls back to the normal live agent. SIP_PITCH_CANNED=0 turns this off.
+PITCH_TEXT = ("উপায় অ্যাপের এমটিবি ইসলামিক ডিপিএস হলো মিউচুয়াল ট্রাস্ট ব্যাংকের শরীয়াহভিত্তিক মাসিক সঞ্চয় স্কিম, যা অ্যাপেই খোলা যায়; মাসে ২০০, ৫০০, ১,০০০ বা ২,০০০ টাকা করে জমা হয়, "
+              "কোনো কাগজপত্র বা ফি লাগে না। মেয়াদ শেষে টাকা ও মুনাফা আপনার উপায় অ্যাকাউন্টে ফিরে আসে - আপনার কি কোনো প্রশ্ন আছে?")
+DECLINE_TEXT = "ঠিক আছে, বিরক্ত করার জন্য দুঃখিত। ভালো থাকবেন, আল্লাহ হাফেজ।"
+PITCH_CANNED = bool(CANNED) and "pitch" in CANNED and "decline" in CANNED and os.getenv("SIP_PITCH_CANNED", "1") != "0"
+if PITCH_CANNED and (CANNED["pitch"]["text"] != PITCH_TEXT or CANNED["decline"]["text"] != DECLINE_TEXT):
+    # the recordings were made from different wording than the prompt now says: never play a pitch the agent does not know about
+    logging.getLogger("sipbridge").warning("recorded pitch/decline text differs from PITCH_TEXT/DECLINE_TEXT: phase A2 disabled until the recordings are regenerated")
+    PITCH_CANNED = False
+UTT_END_S = float(os.getenv("SIP_UTT_END_S", "0.7"))             # trailing silence that ends the callee's first reply
+UTT_MAX_S = float(os.getenv("SIP_UTT_MAX_S", "8"))               # longest first reply we wait for before classifying
+GREETING_Q_S = float(os.getenv("SIP_GREETING_Q_S", "2.5"))              # a greeting cut before this many seconds has not asked its question yet
+GREETING_GRACE_S = float(os.getenv("SIP_GREETING_GRACE_S", "1.5"))     # ignore speech during the first seconds of the greeting: the reflexive "hello?" on pickup
+INTENT_TIMEOUT_S = float(os.getenv("SIP_INTENT_TIMEOUT_S", "6"))      # classifier slower than this -> live agent fallback
+BARGE_FRAMES = int(os.getenv("SIP_BARGE_FRAMES", "12"))          # 12 loud 20 ms frames (0.24 s) while a recording plays = the person interrupts
+BARGE_RMS = int(os.getenv("SIP_BARGE_RMS", "500"))               # ...loud = above this and above 6 x the noise floor. Real phone speech peaks at ~1400-2500 rms (scripted TTS ~10000), so 1200 was too high
 
 # ---- optional manual activity detection (Gemini only hears speech segments). Tested 2026-11-25: no cost saving, left off ----
 CTX_TRIGGER = int(os.getenv("SIP_CTX_TRIGGER_TOKENS", "0"))       # 0 = off. Else: compress the conversation history once it passes this many tokens
@@ -234,9 +264,27 @@ class CallSession:
         self._q = asyncio.Queue()       # frames from the phone, filled by _read_loop (never cancelled mid-frame)
         self.preroll = collections.deque(maxlen=PREROLL_FRAMES)
         self.greeting_played = False
-        self.gen_open = False                  # a Gemini generation has started and its usage message has not arrived yet
+        self.noise_floor = 0                   # callee line noise floor measured in phase A
+        self.stage = "greeted"                 # what the callee has already heard before Gemini opens: greeted | pitched | pitch_cut
+        self.pitch_cut_s = 0.0
+        self.greeting_cut_s = 0.0              # >0: the callee talked over the recorded greeting after this many seconds
+        self._phrase = ("", 0.0)               # (name, seconds) of the last recorded phrase queued
+        self._phrase_t0 = 0.0                  # monotonic time it was queued
+        self.skip_analysis = False
+        self.gen_open = False                 # a Gemini generation has started and its usage message has not arrived yet
         self.last_tokens = None                # token columns of the last recorded generation (basis for an estimate)
         self._usage_evt = asyncio.Event()
+        self._rec = None                       # diagnostic: raw callee audio of calls to TEST numbers only (SIP_RECORD_TEST_CALLS=0 turns it off)
+        if self.is_test and os.getenv("SIP_RECORD_TEST_CALLS", "1") != "0":
+            try:
+                os.makedirs("/app/data/debug_audio", exist_ok=True)
+                for fn in os.listdir("/app/data/debug_audio"):            # keep two weeks only
+                    fp = os.path.join("/app/data/debug_audio", fn)
+                    if time.time() - os.path.getmtime(fp) > 14 * 86400:
+                        os.remove(fp)
+                self._rec = open(f"/app/data/debug_audio/{self.cid}_in.pcm", "wb")     # 8 kHz 16-bit mono, as received from Asterisk
+            except Exception:
+                self._rec = None
         self.player_task = None
         self.read_task = None
         self.analysis_task = None
@@ -271,6 +319,18 @@ class CallSession:
             self.tone_done.set()
 
     # ---------- setup ----------
+    def _step1(self) -> str:
+        if not CANNED:
+            return STEP1_LIVE
+        g = CANNED["greeting"]["text"]
+        if self.stage == "pitched":
+            return STEP1_PITCHED.format(greeting=g, pitch=PITCH_TEXT)
+        if self.stage == "pitch_cut":
+            return STEP1_PITCH_CUT.format(greeting=g, pitch=PITCH_TEXT, secs=max(1, round(self.pitch_cut_s)))
+        if self.greeting_cut_s:
+            return STEP1_GREETING_CUT.format(greeting=g, secs=max(1, round(self.greeting_cut_s)))
+        return STEP1_CANNED.format(greeting=g)
+
     def _build_setup(self):
         lang = self.info.language
         cfg = LANGUAGES.get(lang, LANGUAGES["Bengali"])
@@ -278,7 +338,7 @@ class CallSession:
         prompt = PHONE_PROMPT.format(
             today=datetime.now().strftime("%Y-%m-%d (%A)"), purpose=self.info.purpose,
             callee_line=callee, language=lang, facts=load_phone_facts(),
-            step1=STEP1_CANNED.format(greeting=CANNED["greeting"]["text"]) if CANNED else STEP1_LIVE,
+            step1=self._step1(),
         )
         return {
             "setup": {
@@ -331,13 +391,17 @@ class CallSession:
                 LIVE_TOOLS_MAP["save_collected_information"],
                 {"data": {"phone_number": self.info.dialed, "call_direction": "outbound"}, "session_id": self.cid},
             )
-            setup = await run_in_threadpool(self._build_setup)
             verdict = "speech"
             if CANNED:
+                if PITCH_CANNED:
+                    asyncio.create_task(run_in_threadpool(intent.warm))   # connection ready by the time the greeting ends
                 verdict = await self.pre_live()        # phase A: recorded greeting, no Gemini session yet
+                if verdict == "speech" and PITCH_CANNED:
+                    verdict = await self.reply_stage() # phase A2: classify the first reply -> recorded pitch / apology, or fall back
             if verdict != "speech":
                 self.log.info("call ending: %s (no Gemini session was opened)", self.end_reason)
             else:
+                setup = await run_in_threadpool(self._build_setup)
                 async with websockets.connect(GEMINI_WS_URL, max_size=None) as gws:
                     await gws.send(json.dumps(setup))
                     resp = await gws.recv()
@@ -380,9 +444,11 @@ class CallSession:
                 if t:
                     t.cancel()
             await self._flush_transcript()
+            if self._rec:
+                self._rec.close()
             dur = time.time() - started
             await self._record_outcome(dur)
-            if self.user_spoke:   # nobody spoke -> nothing to analyse, nothing to pay
+            if self.user_spoke and not self.skip_analysis:   # nobody spoke -> nothing to analyse, nothing to pay
                 self.analysis_task = asyncio.create_task(self._analyze())
             try:
                 self.writer.write(make_frame(KIND_HANGUP))
@@ -397,7 +463,10 @@ class CallSession:
         """Reads AudioSocket frames forever into a queue, so consumers can time out without ever cutting a frame in half."""
         try:
             while True:
-                self._q.put_nowait(await read_frame(self.reader))
+                fr = await read_frame(self.reader)
+                if self._rec and fr[0] == KIND_AUDIO:
+                    self._rec.write(fr[1])
+                self._q.put_nowait(fr)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -411,6 +480,8 @@ class CallSession:
         if not c:
             return 0.0
         self.out_buf.extend(c["pcm"])
+        self._phrase = (name, len(c["pcm"]) / 16000.0)
+        self._phrase_t0 = time.monotonic()
         return len(c["pcm"]) / 16000.0
 
     async def _wait_drained(self, extra: float = 0.4, timeout: float = 20.0):
@@ -419,13 +490,15 @@ class CallSession:
             await asyncio.sleep(0.05)
         await asyncio.sleep(extra)
 
-    async def pre_live(self) -> str:
-        """Phase A: nothing is sent to Gemini. Plays the recorded greeting, then waits for the callee to speak.
+    async def pre_live(self, first: str = "greeting") -> str:
+        """Phase A: nothing is sent to Gemini. Plays the recorded `first` phrase (none if ""), then waits for the callee to speak.
         Returns "speech" (open the Gemini session), "no_response" or "hangup" (call is over, nothing was billed by Gemini)."""
-        self.queue_audio("greeting")
+        if first:
+            self.queue_audio(first)
         t0 = time.monotonic()
         rms_hist = collections.deque(maxlen=250)     # 5 s of recent callee energy while the agent is quiet -> noise floor
         speech_frames, nudge, peak, silent_since = 0, 0, 0, None
+        barge_loud = 0                                  # loud frames while a recorded phrase plays (the person talks over it)
         while True:
             now = time.monotonic()
             if now - t0 > NO_SPEECH_CAP_S:
@@ -443,6 +516,21 @@ class CallSession:
                 self.preroll.append(payload)
                 rms = audioop.rms(payload, 2)
                 peak = max(peak, rms)
+                in_grace = self._phrase[0] == "greeting" and time.monotonic() - self._phrase_t0 < GREETING_GRACE_S
+                if self.out_buf and PITCH_CANNED and not in_grace:
+                    fl = sorted(rms_hist)[len(rms_hist) // 5] if len(rms_hist) >= 25 else 0
+                    barge_loud = barge_loud + 1 if rms > max(BARGE_RMS, 6 * fl) else max(0, barge_loud - 1)
+                    if barge_loud >= BARGE_FRAMES:
+                        name, total = self._phrase
+                        cut = max(0.0, total - len(self.out_buf) / 16000.0)
+                        self.out_buf.clear()
+                        self.noise_floor = fl
+                        self.greeting_cut_s = cut if name == "greeting" else 0.0
+                        self.last_voice_ts = time.monotonic()
+                        self.log.info("phase A: callee talked over the recorded '%s' after %.1fs -> listening to them", name, cut)
+                        return "speech"
+                else:
+                    barge_loud = 0
                 if not agent_busy:
                     rms_hist.append(rms)
                     srt = sorted(rms_hist)
@@ -452,6 +540,7 @@ class CallSession:
                     else:
                         speech_frames = max(0, speech_frames - 1)
                     if speech_frames >= LAZY_SPEECH_FRAMES:
+                        self.noise_floor = floor
                         self.last_voice_ts = time.monotonic()
                         self.log.info("phase A: callee spoke %.1fs after pickup (peak rms %d, noise floor %d) -> opening Gemini session",
                                       now - t0, peak, floor)
@@ -470,6 +559,130 @@ class CallSession:
                     self.queue_audio(f"nudge{nudge}")
                 else:
                     return await self._prelive_goodbye("still silent after the nudges", peak, rms_hist)
+
+    async def _log_msg(self, role: str, text: str):
+        try:
+            await run_in_threadpool(conversation_store.append, self.cid, ConversationMessage(role=role, content=text, timestamp=datetime.now()))
+        except Exception as e:
+            self.log.warning("transcript not saved: %s", e)
+
+    async def reply_stage(self) -> str:
+        """Phase A2 (still no Gemini session): the callee has started their first reply. Wait for it to end, classify it with one cheap
+        text-model call, then: clear Bengali YES -> recorded pitch (they can interrupt it); clear NO -> recorded apology and hang up;
+        anything else -> "speech" = open the live agent exactly as before (their reply is handed over, nothing is lost).
+        Returns "speech", "hangup" or "declined"."""
+        frames = list(self.preroll)
+        thr = max(LAZY_MIN_RMS, 3 * self.noise_floor)
+        end_frames = max(1, int(UTT_END_S / 0.02))
+        quiet, t0 = 0, time.monotonic()
+        while time.monotonic() - t0 < UTT_MAX_S:
+            try:
+                kind, payload = await asyncio.wait_for(self._q.get(), 0.5)
+            except asyncio.TimeoutError:
+                break
+            if kind == KIND_HANGUP:
+                self.end_reason = "callee hung up while answering the greeting"
+                return "hangup"
+            if kind != KIND_AUDIO or len(payload) < 2:
+                continue
+            frames.append(payload)
+            quiet = 0 if audioop.rms(payload, 2) > thr else quiet + 1
+            if quiet >= end_frames:
+                break
+        ack_s = self.queue_audio("ack")        # short recorded "জি।" so the ~2 s classification is not dead air (people say "hello?" into silence)
+        t1 = time.monotonic()
+        try:
+            res = await asyncio.wait_for(run_in_threadpool(intent.classify_reply, b"".join(frames), session_id=self.cid,
+                                                           call_id=self.info.call_id, is_test=self.is_test), INTENT_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            self.log.warning("phase A2: classifier took longer than %.0fs -> live agent fallback", INTENT_TIMEOUT_S)
+            res = {"intent": "unclear", "reason": "not_interested", "lang": "other", "text": ""}
+        took = time.monotonic() - t1
+        self.log.info("phase A2: first reply %.1fs long, classified in %.1fs (recorded ack %.1fs -> silence after it ~%.1fs) -> %s/%s",
+                      len(frames) * 0.02, took, ack_s, max(0.0, took - ack_s), res["intent"], res["lang"])
+        fallback = res["lang"] != "bn" or res["intent"] not in ("yes", "no")
+        if res["intent"] == "yes" and self.greeting_cut_s and self.greeting_cut_s < GREETING_Q_S:
+            self.log.info("phase A2: the greeting was cut after %.1fs, before its question: a 'yes' is not an answer -> live agent", self.greeting_cut_s)
+            fallback = True
+        # the frames that arrived while we were classifying (never lose a hang-up). If the person is already talking again, they are not
+        # waiting for a recording: hand everything to the live agent instead of talking over them.
+        late = []
+        while not self._q.empty():
+            k, pl = self._q.get_nowait()
+            if k == KIND_HANGUP:
+                self.end_reason = "callee hung up after answering the greeting"
+                return "hangup"
+            if k == KIND_AUDIO:
+                late.append(pl)
+        skip = int(ack_s / 0.02) + 10          # ignore the first frames: the recorded "জি" may echo back on a loudspeaker
+        if not fallback and sum(1 for f in late[skip:] if len(f) >= 2 and audioop.rms(f, 2) > thr) >= 8:
+            self.log.info("phase A2: the person kept talking during the classification -> live agent instead of the recording")
+            fallback = True
+        if fallback:
+            self.preroll = collections.deque(frames + late)       # unbounded: hand the whole reply to Gemini
+            return "speech"
+        self.preroll.clear()
+        self.user_spoke = True
+        await self._log_msg("assistant", CANNED["greeting"]["text"])
+        await self._log_msg("user", res["text"] or ("হ্যাঁ" if res["intent"] == "yes" else "না"))
+        if res["intent"] == "no":
+            await self._log_msg("assistant", DECLINE_TEXT)
+            self.queue_audio("decline")
+            await self._wait_drained()
+            self.outcome = res["reason"]                        # not_interested | do_not_call | wrong_number
+            self.skip_analysis = res["reason"] == "not_interested"   # do-not-call / wrong number still get the analysis (to-do for the team)
+            try:
+                await run_in_threadpool(LIVE_TOOLS_MAP["save_collected_information"], {"data": {
+                    "Summary": f"Declined at the first question ({res['reason']}); no live agent needed.",
+                    "Interest Level": "none", "Call Outcome": res["reason"]}, "session_id": self.cid})
+            except Exception as e:
+                self.log.warning("decline summary not saved: %s", e)
+            self.end_reason = "declined at the first question (recorded apology, no Gemini session)"
+            return "declined"
+        # ---- clear yes: recorded pitch, with barge-in ----
+        await self._log_msg("assistant", PITCH_TEXT)
+        self.stage = "pitched"
+        outcome = await self._play_pitch()
+        if outcome == "hangup":
+            return "hangup"
+        if outcome == "cut":
+            self.stage = "pitch_cut"
+            return "speech"
+        return await self.pre_live(first="")      # wait (no Gemini yet) for their reaction to the pitch; nudges + goodbye as usual
+
+    async def _play_pitch(self) -> str:
+        """Plays the recorded pitch and watches the callee's line. Returns "done", "cut" (callee talked over it; their audio is kept
+        in self.preroll for the live agent) or "hangup". Loud = above BARGE_RMS and 6 x the noise floor, so loudspeaker echo of the
+        pitch itself does not count."""
+        total = self.queue_audio("pitch")
+        thr = max(BARGE_RMS, 6 * self.noise_floor)
+        recent = collections.deque(maxlen=75)
+        loud, n_frames, max_rms = 0, 0, 0
+        while self.out_buf:
+            try:
+                kind, payload = await asyncio.wait_for(self._q.get(), 0.1)
+            except asyncio.TimeoutError:
+                continue
+            if kind == KIND_HANGUP:
+                self.end_reason = "callee hung up during the pitch"
+                self.out_buf.clear()
+                return "hangup"
+            if kind != KIND_AUDIO or len(payload) < 2:
+                continue
+            recent.append(payload)
+            rms = audioop.rms(payload, 2)
+            n_frames, max_rms = n_frames + 1, max(max_rms, rms)
+            loud = loud + 1 if rms > thr else max(0, loud - 1)
+            if loud >= BARGE_FRAMES:
+                self.pitch_cut_s = max(0.0, total - min(total, len(self.out_buf) / 16000.0))
+                self.out_buf.clear()
+                self.preroll = collections.deque(recent)
+                self.log.info("phase A2: callee talked over the pitch after %.1fs -> opening Gemini with their audio", self.pitch_cut_s)
+                return "cut"
+        await asyncio.sleep(0.4)
+        self.log.info("phase A2: recorded pitch played in full (%.1fs); line during the pitch: %d frames, peak rms %d (barge threshold %d)",
+                      total, n_frames, max_rms, thr)
+        return "done"
 
     async def _prelive_goodbye(self, why: str, peak: int, rms_hist) -> str:
         srt = sorted(rms_hist)
