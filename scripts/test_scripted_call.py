@@ -18,6 +18,7 @@ SCENARIOS = {
     "B": ["আমি এখন ব্যস্ত, আর ফোন দেবেন না।"],
     "D": [],
     "G": ["হ্যাঁ, বলুন।", "মুনাফা কত শতাংশ?", "ঠিক আছে, ধন্যবাদ, রাখছি।"],   # callee talks over the greeting after 2 s (before its question)
+    "R": ["হ্যাঁ, বলুন।", "হ্যালো?", "বলুন বলুন, যা বলছেন।", "না, আর কিছু জানতে চাই না। ধন্যবাদ।"],   # greeting cut, then hello + go-ahead: the agent must introduce itself ONCE and then pitch, never re-introduce
     "V": ["হ্যাঁ, বলুন।", "ঠিক আছে, ধন্যবাদ, রাখছি।"],   # callee says yes over the end of the greeting after 7 s (question already asked)
     "M": ["হ্যাঁ, বলুন।", "সর্বনিম্ন কত টাকা জমা দিতে হবে?"],   # then silence: the agent must answer, ask if there is more, and WAIT (no goodbye in the same turn)
     "Y": ["হ্যাঁ, বলুন।"],   # yes, then silence after the pitch: the pre-opened Gemini session must be closed unused, cost = classifier only
@@ -80,10 +81,10 @@ class ScriptedReader:
                     self.hangup_at = time.time() + 1.5          # hang up 1.5 s after the last question ends
             return f
         s = self.session
-        barge = (os.getenv("SCENARIO") == "P" and s and getattr(s, "stage", "") == "pitched" and bool(s.out_buf) and len(self.clips) == 2) or (os.getenv("SCENARIO") in ("G", "V") and s and getattr(s, "stage", "") == "greeted" and bool(s.out_buf) and len(self.clips) == (3 if os.getenv("SCENARIO") == "G" else 2) and not self.cur)
+        barge = (os.getenv("SCENARIO") == "P" and s and getattr(s, "stage", "") == "pitched" and bool(s.out_buf) and len(self.clips) == 2) or (os.getenv("SCENARIO") in ("G", "V", "R") and s and getattr(s, "stage", "") == "greeted" and bool(s.out_buf) and len(self.clips) == (3 if os.getenv("SCENARIO") == "G" else 4 if os.getenv("SCENARIO") == "R" else 2) and not self.cur)
         if s and self.clips and (barge or ((s.first_audio.is_set() or getattr(s, "greeting_played", False)) and not s.turn_open and not s.out_buf and not (os.getenv("SCENARIO") == "P" and len(self.clips) == 2))):
             if self.armed_at is None: self.armed_at = time.time()
-            if time.time() - self.armed_at > ((2.0 if os.getenv("SCENARIO") == "G" else 7.0 if os.getenv("SCENARIO") == "V" else 5.0) if barge else 1.2):
+            if time.time() - self.armed_at > ((2.0 if os.getenv("SCENARIO") in ("G", "R") else 7.0 if os.getenv("SCENARIO") == "V" else 5.0) if barge else 1.2):
                 self.cur, self.armed_at = self.clips.pop(0), None
         else:
             self.armed_at = None

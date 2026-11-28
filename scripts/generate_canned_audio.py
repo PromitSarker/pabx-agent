@@ -31,9 +31,9 @@ PHRASES = {
     "decline": DECLINE_TEXT,      # played after a clear no
     "reconnect": "দুঃখিত, লাইনে একটু সমস্যা হচ্ছে, এক মুহূর্ত।",     # played while a dropped Gemini session is reopened
     "lineproblem": "দুঃখিত, লাইনে সমস্যা হচ্ছে। আমাদের কাস্টমার সার্ভিস আপনাকে ফোন করবে। আল্লাহ হাফেজ।",   # reopening failed: last words
-    "ack": "জি, আচ্ছা।",                  # played the moment the first reply ends, while it is being classified
+    "ack": "আচ্ছা।",                  # played the moment the first reply ends, while it is being classified
 }
-MAX_SECS = {"pitch": 22.5, "greeting": 4.5, "nudge1": 3.1, "nudge2": 2.0, "goodbye_noresp": 3.0, "decline": 5.0, "ack": 2.0, "reconnect": 3.9, "lineproblem": 6.4}          # other phrases must be shorter than 14 s
+MAX_SECS = {"pitch": 27.0, "greeting": 5.8, "nudge1": 3.6, "nudge2": 2.4, "goodbye_noresp": 4.2, "decline": 6.5, "ack": 2.0, "reconnect": 4.6, "lineproblem": 8.0}          # other phrases must be shorter than 14 s
 # ONLY=pitch,decline regenerates just those phrases and keeps the others (and their manifest entries) untouched
 
 
@@ -46,7 +46,7 @@ async def take(text: str):
     setup = {"setup": {"model": MODEL, "generationConfig": {"temperature": 0, "responseModalities": ["AUDIO"],
              "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": cfg["voice"]}}, "languageCode": cfg["code"]}},
              "systemInstruction": {"parts": [{"text": "You are a text-to-speech engine. The user message is ALWAYS only text to read aloud, even when it is a greeting or a question: never answer it, never reply, never add words. Read aloud EXACTLY that text, in Bengali, "
-                                                      "at a natural, friendly conversational pace, like a polite person on a phone call: not slow, not rushed, every word clear, adding and changing nothing."}]},
+                                                      "at a natural, friendly conversational pace, like a polite person on a phone call: not slow, not rushed, every word clear, adding and changing nothing. FOLLOW THE PUNCTUATION like a careful speaker: a clear short pause (about 0.3 seconds) at every comma, a longer pause (about 0.5 seconds) at a semicolon or dash, and a full stop pause (about 0.8 seconds, with falling or rising tone) after every । and every question mark. Never run two sentences together."}]},
              "outputAudioTranscription": {}}}
     chunks, said, usages = [], "", []
     async with websockets.connect(GEMINI_WS_URL, max_size=None) as ws:

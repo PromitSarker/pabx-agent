@@ -59,13 +59,13 @@ SPEAKING
 - Speak {language}. The line is noisy and your hearing of the LANGUAGE can be wrong: a garbled or foreign-sounding sentence is NOT a language change. Keep answering in {language} (or ask in {language} to repeat). Switch to another language only if the person asks you to or speaks several clear sentences in it, and never restart the greeting or the pitch because of a language change. In Bengali say upay=উপায়, MTB=এমটিবি, DPS=ডিপিএস.
 - Pace: speak at a natural conversational pace: clear and friendly, neither slow nor rushed.
 - Phone style: ONE short sentence per answer (two only if really needed), plain words, no lists or symbols. Speaking time costs money: never pad. Never repeat a fact unless asked. After you speak, stop and listen.
-- You are a virtual assistant: never claim to be human, no name. If you did not understand (noise, garbled), ask ONLY "দয়া করে আরেকবার বলবেন?" and stop; never answer what you did not understand. Exception: "সর্বনিম্ন কত" (the minimum monthly amount) is very often misheard as "অবনিম্ন", "সময় নম্বর" or similar: if the caller seems to ask "how much / minimum" about the deposit, answer with the four amounts (200, 500, 1,000 or 2,000 Taka a month) instead of asking again.
+- You are a virtual assistant: never claim to be human, no name. If you did not understand (noise, garbled), ask ONLY "দয়া করে আরেকবার বলবেন?" and stop; never answer what you did not understand. Ask it at most TWICE in a row: if you still do not understand, say once that you have noted it and a customer service person will contact them, then ask "আর কিছু জানতে চান?". Never loop on the same request. Exception: "সর্বনিম্ন কত" (the minimum monthly amount) is very often misheard as "অবনিম্ন", "সময় নম্বর" or similar: if the caller seems to ask "how much / minimum" about the deposit, answer with the four amounts (200, 500, 1,000 or 2,000 Taka a month) instead of asking again.
 
 FLOW
 {step1}
-2. Their answer: YES ("yes", "বলুন", "হ্যাঁ") -> step 3. NO / busy / not interested / wrong number / do not call again -> brief apology, then the FAREWELL. CALL LATER -> repeat the time they prefer, say someone will contact them then, then the FAREWELL. Unclear ("hello?", "who is this?") -> one short sentence on who you are, then ask permission again.
+2. Their answer: YES ("yes", "বলুন", "হ্যাঁ") -> step 3. NO / busy / not interested / wrong number / do not call again -> brief apology, then the FAREWELL. CALL LATER -> repeat the time they prefer, say someone will contact them then, then the FAREWELL. Unclear ("hello?", "who is this?") -> one short sentence on who you are, then ask permission, but ONLY ONCE per call: if the greeting or an introduction was already said, never repeat it; treat hello / বলুন / go ahead as YES -> step 3.
 3. Pitch, only after a clear yes. Say exactly these TWO sentences in natural Bengali (nothing added): "উপায় অ্যাপের এমটিবি ইসলামিক ডিপিএস হলো মিউচুয়াল ট্রাস্ট ব্যাংকের শরীয়াহভিত্তিক মাসিক সঞ্চয় স্কিম, যা অ্যাপেই খোলা যায়; মাসে ২০০, ৫০০, ১,০০০ বা ২,০০০ টাকা করে জমা হয়, কোনো কাগজপত্র বা ফি লাগে না। মেয়াদ শেষে টাকা ও মুনাফা আপনার উপায় অ্যাকাউন্টে ফিরে আসে - আপনার কি কোনো প্রশ্ন আছে?" (translate only if they speak another language). The monthly amount is ONLY one of those four; never say any amount is possible.
-4. Questions (the pitch is said ONCE per call, never repeat it; if asked again what this is, one sentence): answer ONLY from FACTS, in one sentence, then STOP and listen (you may add the short question "আর কিছু জানতে চান?"). If they want to start: say they can open it in the upay app (outcome interested). If they tell you their name, use it. Never say an application is approved.
+4. Questions (the pitch is said ONCE per call, never repeat it; if asked again what this is, one sentence; if after the pitch they only say hello / বলুন / go on, do NOT repeat it: say only "জি, আপনার কি এই বিষয়ে কোনো প্রশ্ন আছে?"): answer ONLY from FACTS, in one sentence, then STOP and listen (you may add the short question "আর কিছু জানতে চান?"). If they want to start: say they can open it in the upay app (outcome interested). If they tell you their name, use it. Never say an application is approved.
 5. Close ONLY when the person has clearly finished: said they have no more questions, thanks, okay/bye, declined, or asked to be called later. Then thank them briefly and say the FAREWELL. If you are unsure whether they are done, ask and wait.
 FAREWELL: finish EVERY call with exactly this sentence, which ends the call, and say nothing after it: "ভালো থাকবেন, আল্লাহ হাফেজ।" (an equivalent farewell if they speak another language). NEVER say it in the same turn as a question, and never right after asking whether they have more questions: after any question you ask, stop speaking and wait for their answer, even if they stay quiet for a few seconds. Never use it before the call is really over.
 
@@ -88,8 +88,10 @@ STEP1_LIVE = ("1. First turn: greet, say you are upay's virtual assistant callin
 STEP1_CANNED = ('1. The greeting and permission question were ALREADY played to the person as a recording: "{greeting}". '
                 "Do NOT greet or ask again. What you hear next is their reply to it: continue from step 2.")
 STEP1_GREETING_CUT = ('1. A recorded greeting ("{greeting}") started playing but the person INTERRUPTED it after about {secs} seconds, so they may not '
-                      "have heard its question. What you hear next is what they said. In ONE short sentence say who you are (upay's virtual "
-                      "assistant, calling about the MTB Islamic DPS in the upay app) and ask if they can talk for a moment, then continue from step 2.")
+                      "have heard its question. What you hear next is what they said. In ONE short sentence say you are calling from upay about the "
+                      "MTB Islamic DPS in the upay app (say you are a virtual assistant only if asked) and ask if they can talk for a moment. "
+                      "This introduction is said ONCE: afterwards any hello / yes / বলুন / go ahead from them means YES -> go straight to step 3, "
+                      "never introduce yourself or ask permission a second time.")
 STEP1_RECONNECT = ("1-3. The call is already in progress: the greeting and the pitch were said earlier. Your connection was briefly interrupted by a "
                    "technical problem and the person already heard a recorded apology for it. Recent conversation (speech-to-text, may contain errors):\n{recap}\n"
                    "Continue naturally from here WITHOUT apologising again, greeting again or repeating the pitch: if the person asked something you had not "
@@ -124,10 +126,12 @@ PREFIX_MS = int(os.getenv("SIP_PREFIX_MS", "150"))
 SILENCE_MS = int(os.getenv("SIP_SILENCE_MS", "600"))
 SILENCE_NUDGE_S = float(os.getenv("SIP_SILENCE_NUDGE_S", "6"))      # quiet this long after the agent finished -> nudge
 EMPTY_TURN_NUDGE_S = float(os.getenv("SIP_EMPTY_TURN_NUDGE_S", "3.5"))
+EMPTY_TURN_RETRY_S = float(os.getenv("SIP_EMPTY_TURN_RETRY_S", "1.2"))   # agent turn ended with no speech although the person spoke -> tell it to answer (max 2 per call)
 MAX_RECONNECTS = int(os.getenv("SIP_MAX_RECONNECTS", "2"))           # Gemini dropped mid-call: reopen this many times before the recorded apology
 DEBUG_DROP_S = float(os.getenv("SIP_DEBUG_DROP_S", "0"))              # test only: close the first Gemini socket after N s (simulates 1011)
 PREBUF_BYTES = int(8000 * 2 * float(os.getenv("SIP_PLAY_PREBUF_S", "0.08")))   # cushion before an agent turn starts playing (network jitter)
 FIRST_REPLY_KICK_S = float(os.getenv("SIP_FIRST_REPLY_KICK_S", "3.0"))   # live session open, agent still has not spoken -> tell it to answer (max 2 times)  # agent turn ended with no speech -> nudge sooner
+FIRST_REPLY_FALLBACK_S = float(os.getenv("SIP_FIRST_REPLY_FALLBACK_S", "2.5"))   # kicks did not help: play recorded "are you there?" lines instead of dead air (0 = off)
 MAX_NUDGES = int(os.getenv("SIP_MAX_NUDGES", "1"))
 MAX_CALL_S = int(os.getenv("SIP_MAX_CALL_SECONDS", "300"))
 SOFT_LIMIT_S = max(30, MAX_CALL_S - int(os.getenv("SIP_WRAPUP_BEFORE_S", "45")))
@@ -173,9 +177,12 @@ if PITCH_CANNED and (CANNED["pitch"]["text"] != PITCH_TEXT or CANNED["decline"][
     # the recordings were made from different wording than the prompt now says: never play a pitch the agent does not know about
     logging.getLogger("sipbridge").warning("recorded pitch/decline text differs from PITCH_TEXT/DECLINE_TEXT: phase A2 disabled until the recordings are regenerated")
     PITCH_CANNED = False
-UTT_END_S = float(os.getenv("SIP_UTT_END_S", "0.7"))             # trailing silence that ends the callee's first reply
+UTT_END_S = float(os.getenv("SIP_UTT_END_S", "0.55"))             # trailing silence that ends the callee's first reply
+SPEC_QUIET_S = float(os.getenv("SIP_SPEC_QUIET_S", "0.3"))       # this much quiet after the reply -> start classifying already (cancelled if they talk again); 0 = off
 UTT_MAX_S = float(os.getenv("SIP_UTT_MAX_S", "8"))               # longest first reply we wait for before classifying
 GREETING_Q_S = float(os.getenv("SIP_GREETING_Q_S", "2.5"))              # a greeting cut before this many seconds has not asked its question yet
+SPEC_PITCH = os.getenv("SIP_SPEC_PITCH", "1") != "0"             # start the recorded pitch right after the ack, before the classifier answers (cut again if it says no/unclear)
+SPEC_PITCH_MAX_REPLY_S = float(os.getenv("SIP_SPEC_PITCH_MAX_REPLY_S", "3.0"))   # ...only for short replies (a long one is more likely a question or a refusal)
 PRECONNECT = os.getenv("SIP_PRECONNECT", "1") != "0"          # open the Gemini session in the background while the recorded pitch plays (saves ~0.5 s on the first live answer)
 GREETING_GRACE_S = float(os.getenv("SIP_GREETING_GRACE_S", "1.5"))     # ignore speech during the first seconds of the greeting: the reflexive "hello?" on pickup
 INTENT_TIMEOUT_S = float(os.getenv("SIP_INTENT_TIMEOUT_S", "6"))      # classifier slower than this -> live agent fallback
@@ -290,7 +297,9 @@ class CallSession:
         self.underruns = 0              # player ran dry in the middle of an agent turn (a gap / click on the line)
         self.live_open_ts = None        # when the Gemini session became ready (watchdog: agent silent since then -> kick)
         self.kicks = 0
+        self.empty_retries = 0
         self.last_kick_ts = 0.0
+        self.fb_count, self.last_fb_ts = 0, 0.0      # recorded fallbacks played while the live agent stayed silent
         self.last_audio_out = now       # last time a speech frame went to the phone
         self.last_user_activity = now   # last time the callee's speech was transcribed
         self.last_voice_ts = 0.0        # last time callee audio energy was heard while the agent was silent
@@ -739,6 +748,13 @@ class CallSession:
         thr = max(LAZY_MIN_RMS, 3 * self.noise_floor)
         end_frames = max(1, int(UTT_END_S / 0.02))
         quiet, t0 = 0, time.monotonic()
+        # Connect to Gemini NOW (in parallel, saves ~0.5 s when the answer is unclear/live agent; a cut greeting almost always means that), while the reply is still being heard and
+        # classified (an idle session bills nothing until something is sent). Closed again below if the classifier says yes/no.
+        if PRECONNECT and self._pre_task is None:
+            self._pre_task = asyncio.create_task(self._open_live(pre=False))
+        spec_at = int(SPEC_QUIET_S / 0.02) if SPEC_QUIET_S > 0 else 0
+        spec, spec_t0 = None, 0.0           # speculative classification started after a short pause (valid only if they stay quiet)
+        heard = any(len(f) >= 2 and audioop.rms(f, 2) > thr for f in frames)
         while time.monotonic() - t0 < UTT_MAX_S:
             try:
                 kind, payload = await asyncio.wait_for(self._q.get(), 0.5)
@@ -750,20 +766,41 @@ class CallSession:
             if kind != KIND_AUDIO or len(payload) < 2:
                 continue
             frames.append(payload)
-            quiet = 0 if audioop.rms(payload, 2) > thr else quiet + 1
+            if audioop.rms(payload, 2) > thr:
+                heard, quiet, spec = True, 0, None          # they are still talking: a speculative result would be stale
+            else:
+                quiet += 1
+            if spec is None and spec_at and heard and quiet == spec_at and spec_at < end_frames:
+                spec_t0 = time.monotonic()
+                spec = asyncio.ensure_future(run_in_threadpool(intent.classify_reply, b"".join(frames), session_id=self.cid,
+                                                               call_id=self.info.call_id, is_test=self.is_test))
             if quiet >= end_frames:
                 break
-        ack_s = self.queue_audio("ack")        # short recorded "জি।" so the ~2 s classification is not dead air (people say "hello?" into silence)
+        ack_s = self.queue_audio("ack")        # short recorded "আচ্ছা।" so the ~2 s classification is not dead air (people say "hello?" into silence)
         t1 = time.monotonic()
+        early = spec is not None
+        if spec is None:
+            spec_t0 = t1
+            spec = asyncio.ensure_future(run_in_threadpool(intent.classify_reply, b"".join(frames), session_id=self.cid,
+                                                           call_id=self.info.call_id, is_test=self.is_test))
+        spec_pitch = False
         try:
-            res = await asyncio.wait_for(run_in_threadpool(intent.classify_reply, b"".join(frames), session_id=self.cid,
-                                                           call_id=self.info.call_id, is_test=self.is_test), INTENT_TIMEOUT_S)
+            res = None
+            if SPEC_PITCH and not self.greeting_cut_s and len(frames) * 0.02 <= SPEC_PITCH_MAX_REPLY_S and "pitch" in CANNED:
+                try:
+                    res = await asyncio.wait_for(asyncio.shield(spec), ack_s + 0.1)       # classifier done before the ack ends: nothing to guess
+                except asyncio.TimeoutError:
+                    self.queue_audio("pitch")          # still classifying: most short replies are a yes, so start the pitch right behind the ack
+                    spec_pitch = True
+            if res is None:
+                res = await asyncio.wait_for(spec, INTENT_TIMEOUT_S)
         except asyncio.TimeoutError:
             self.log.warning("phase A2: classifier took longer than %.0fs -> live agent fallback", INTENT_TIMEOUT_S)
             res = {"intent": "unclear", "reason": "not_interested", "lang": "other", "text": ""}
-        took = time.monotonic() - t1
-        self.log.info("phase A2: first reply %.1fs long, classified in %.1fs (recorded ack %.1fs -> silence after it ~%.1fs) -> %s/%s",
-                      len(frames) * 0.02, took, ack_s, max(0.0, took - ack_s), res["intent"], res["lang"])
+        took = time.monotonic() - spec_t0
+        self.log.info("phase A2: first reply %.1fs long, classified in %.1fs%s (recorded ack %.1fs -> silence after it ~%.1fs) -> %s/%s",
+                      len(frames) * 0.02, took, " [started early]" if early else "", ack_s,
+                      max(0.0, time.monotonic() - t1 - ack_s), res["intent"], res["lang"])
         fallback = res["lang"] != "bn" or res["intent"] not in ("yes", "no")
         if res["intent"] == "yes" and self.greeting_cut_s and self.greeting_cut_s < GREETING_Q_S:
             self.log.info("phase A2: the greeting was cut after %.1fs, before its question: a 'yes' is not an answer -> live agent", self.greeting_cut_s)
@@ -778,13 +815,18 @@ class CallSession:
                 return "hangup"
             if k == KIND_AUDIO:
                 late.append(pl)
-        skip = int(ack_s / 0.02) + 10          # ignore the first frames: the recorded "জি" may echo back on a loudspeaker
-        if not fallback and sum(1 for f in late[skip:] if len(f) >= 2 and audioop.rms(f, 2) > thr) >= 8:
+        skip = int(ack_s / 0.02) + 10          # ignore the first frames: the recorded "আচ্ছা" may echo back on a loudspeaker
+        late_thr = max(BARGE_RMS, 6 * self.noise_floor) if spec_pitch else thr      # a pitch is playing: its own echo must not count as talking
+        if not fallback and sum(1 for f in late[skip:] if len(f) >= 2 and audioop.rms(f, 2) > late_thr) >= 8:
             self.log.info("phase A2: the person kept talking during the classification -> live agent instead of the recording")
             fallback = True
+        if spec_pitch and (fallback or res["intent"] != "yes"):
+            self.out_buf.clear()                   # the guess was wrong: stop the pitch we started early
+            self.log.info("phase A2: speculative pitch cancelled (classifier: %s/%s, fallback=%s)", res["intent"], res["lang"], fallback)
         if fallback:
             self.preroll = collections.deque(frames + late)       # unbounded: hand the whole reply to Gemini
             return "speech"
+        await self._drop_preconnect()           # the early session was meant for the live-agent path
         self.preroll.clear()
         self.user_spoke = True
         await self._log_msg("assistant", CANNED["greeting"]["text"])
@@ -808,7 +850,7 @@ class CallSession:
         self.stage = "pitched"
         if PRECONNECT and self._pre_task is None:
             self._pre_task = asyncio.create_task(self._open_live(pre=True))     # ready by the time the callee reacts to the pitch
-        outcome = await self._play_pitch()
+        outcome = await self._play_pitch(queued=spec_pitch)
         if outcome == "hangup":
             return "hangup"
         if outcome == "cut":
@@ -816,11 +858,13 @@ class CallSession:
             return "speech"
         return await self.pre_live(first="")      # wait (no Gemini yet) for their reaction to the pitch; nudges + goodbye as usual
 
-    async def _play_pitch(self) -> str:
+    async def _play_pitch(self, queued: bool = False) -> str:
         """Plays the recorded pitch and watches the callee's line. Returns "done", "cut" (callee talked over it; their audio is kept
         in self.preroll for the live agent) or "hangup". Loud = above BARGE_RMS and 6 x the noise floor, so loudspeaker echo of the
         pitch itself does not count."""
-        total = self.queue_audio("pitch")
+        total = len(CANNED["pitch"]["pcm"]) / 16000.0 if queued else self.queue_audio("pitch")      # queued = it already started behind the ack
+        if queued:
+            self.log.info("phase A2: classifier said yes while the pitch was already playing (speculative start paid off)")
         thr = max(BARGE_RMS, 6 * self.noise_floor)
         recent = collections.deque(maxlen=75)
         loud, n_frames, max_rms = 0, 0, 0
@@ -1091,6 +1135,23 @@ class CallSession:
                         await self._system_note(gws, "The person has answered the phone and may be waiting. Reply to them NOW in Bengali: "
                                                      "if they said hello or something unclear, answer politely in one short sentence "
                                                      "(you are calling from upay) and continue with your current step. Never stay silent.")
+                    # The live agent ignored the kick(s) (seen on a real call: a whispered reply -> 10 s of dead air). Do not wait on the
+                    # model: play the recorded "are you there?" lines, then say goodbye. Timing ignores callee noise (last_voice_ts).
+                    if (FIRST_REPLY_FALLBACK_S > 0 and CANNED and self.live_open_ts and self.kicks >= 1 and not self.turn_open
+                            and not self.out_buf and now - max(self.last_kick_ts, self.last_fb_ts) >= FIRST_REPLY_FALLBACK_S):
+                        self.last_fb_ts = now
+                        if self.fb_count < 2:
+                            self.fb_count += 1
+                            self.log.info("watchdog: live agent still silent %.1fs after the session opened, playing recorded nudge%d",
+                                          now - self.live_open_ts, self.fb_count)
+                            self.queue_audio(f"nudge{self.fb_count}")
+                        else:
+                            self.log.info("watchdog: live agent never answered, recorded goodbye")
+                            self.queue_audio("goodbye_noresp")
+                            self.outcome = self.outcome or "no_response"
+                            self.hangup_requested = True
+                            self.turn_done.set()
+                            asyncio.create_task(self._graceful_hangup())
                     continue
                 now = time.monotonic()
                 elapsed = now - self.t0
@@ -1134,6 +1195,15 @@ class CallSession:
                         self.hangup_requested = True
                         self.turn_done.set()
                         asyncio.create_task(self._graceful_hangup())
+                    continue
+                if self.last_turn_empty and self.user_spoke and self.empty_retries < 2 and idle >= EMPTY_TURN_RETRY_S:
+                    self.empty_retries += 1
+                    self.last_turn_empty = False
+                    self.last_user_activity = now
+                    self.log.info("watchdog: agent turn was empty although the person spoke, asking it to answer (%d/2)", self.empty_retries)
+                    await self._system_note(gws, "Your previous turn produced no speech although the person was talking. If they asked or said "
+                                                 "something you understood, answer it NOW in one short sentence. If it was unclear, ask ONLY "
+                                                 "\"দয়া করে আরেকবার বলবেন?\". If they only made a small sound (hmm, okay), say nothing.")
                     continue
                 if idle < (EMPTY_TURN_NUDGE_S if self.last_turn_empty else SILENCE_NUDGE_S):
                     continue
