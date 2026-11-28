@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Users, FileText, Send, Database, AlertCircle, CheckCircle, DollarSign, Settings, X } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Send, Database, AlertCircle, CheckCircle, DollarSign, Settings, X, PhoneCall } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { API_BASE_URL, TOKEN_KEY, authFetch, getApiError } from './api';
 import BillingView from './Billing';
+import DialerView from './Dialer';
 import LoginView from './Login';
 
 export default function App() {
@@ -18,6 +19,7 @@ export default function App() {
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} onLogout={logout} />
       <main className="main-content">
         {activeTab === 'dashboard' && <DashboardView />}
+        {activeTab === 'dialer' && <DialerView />}
         {activeTab === 'leads' && <LeadsView />}
         {activeTab === 'knowledge' && <KnowledgeBaseView />}
         {activeTab === 'billing' && <BillingView />}
@@ -30,6 +32,7 @@ export default function App() {
 function Sidebar({ activeTab, setActiveTab, onLogout }) {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
+    { id: 'dialer', label: 'Make Calls', icon: <PhoneCall size={20} /> },
     { id: 'leads', label: 'Collected Leads', icon: <Users size={20} /> },
     { id: 'knowledge', label: 'Knowledge Base', icon: <Database size={20} /> },
     { id: 'billing', label: 'Billing / Cost', icon: <DollarSign size={20} /> },

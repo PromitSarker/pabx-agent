@@ -96,6 +96,7 @@ STEP1_RECONNECT = ("1-3. The call is already in progress: the greeting and the p
                    "technical problem and the person already heard a recorded apology for it. Recent conversation (speech-to-text, may contain errors):\n{recap}\n"
                    "Continue naturally from here WITHOUT apologising again, greeting again or repeating the pitch: if the person asked something you had not "
                    "answered yet, answer it in one short sentence; otherwise ask \"আর কিছু জানতে চান?\" and wait.")
+STEP1_ROTATE = ("1-3. The call is already in progress and going fine: the greeting and the pitch were said earlier. This is a seamless internal refresh of your session, NOT a problem: never mention it, never apologise, never greet, introduce yourself or pitch again. Everything said so far (Person lines are speech-to-text and may contain errors; Agent lines are what you said):\n{recap}\nRemember what the person told you (their name, what they asked, what you already answered) and answer from it if they refer back. Do NOT speak first: wait for the person to speak, then answer from step 4 in one or two short sentences; if they say they have no more questions, go to step 5. Never repeat an answer you already gave unless they ask again.")
 STEP1_PITCH_PRE = ('1-3. The greeting "{greeting}" was played as a recording and the person agreed to talk; then the recorded PITCH played: "{pitch}" '
                    "(the person may have interrupted it part-way). Do NOT greet, ask permission or pitch again. What you hear next is their reaction "
                    'to the pitch: a question or comment -> step 4 (if they only interrupted, answer what they said and do not repeat the pitch); '
@@ -126,6 +127,7 @@ PREFIX_MS = int(os.getenv("SIP_PREFIX_MS", "150"))
 SILENCE_MS = int(os.getenv("SIP_SILENCE_MS", "600"))
 SILENCE_NUDGE_S = float(os.getenv("SIP_SILENCE_NUDGE_S", "6"))      # quiet this long after the agent finished -> nudge
 EMPTY_TURN_NUDGE_S = float(os.getenv("SIP_EMPTY_TURN_NUDGE_S", "3.5"))
+EMPTY_FIX = os.getenv("SIP_EMPTY_FIX", "1") == "1"   # 0 = old behaviour (barge-in turns count as empty)
 EMPTY_TURN_RETRY_S = float(os.getenv("SIP_EMPTY_TURN_RETRY_S", "1.2"))   # agent turn ended with no speech although the person spoke -> tell it to answer (max 2 per call)
 MAX_RECONNECTS = int(os.getenv("SIP_MAX_RECONNECTS", "2"))           # Gemini dropped mid-call: reopen this many times before the recorded apology
 DEBUG_DROP_S = float(os.getenv("SIP_DEBUG_DROP_S", "0"))              # test only: close the first Gemini socket after N s (simulates 1011)
@@ -192,6 +194,15 @@ BARGE_RMS = int(os.getenv("SIP_BARGE_RMS", "500"))               # ...loud = abo
 # ---- optional manual activity detection (Gemini only hears speech segments). Tested 2026-11-25: no cost saving, left off ----
 CTX_TRIGGER = int(os.getenv("SIP_CTX_TRIGGER_TOKENS", "0"))       # 0 = off. Else: compress the conversation history once it passes this many tokens
 CTX_TARGET = int(os.getenv("SIP_CTX_TARGET_TOKENS", "1000"))
+# ---- planned session restart (cost): Gemini Live re-reads (and bills) the WHOLE audio history on every turn. Once the audio part of the
+# context passes ROTATE_TOKENS the bridge quietly opens a fresh Live session that gets the system prompt + a TEXT recap of the call so far.
+# 0 = off. ~25 audio tokens per second of conversation, so 1800 is roughly 70 s.
+ROTATE_TOKENS = int(os.getenv("SIP_ROTATE_AUDIO_TOKENS", "0"))
+ROTATE_MAX = int(os.getenv("SIP_ROTATE_MAX", "3"))                 # restarts per call
+ROTATE_QUIET_S = float(os.getenv("SIP_ROTATE_QUIET_S", "0.8"))     # the agent finished speaking and the line has been quiet this long
+ROTATE_RECAP_PERSON = int(os.getenv("SIP_ROTATE_RECAP_PERSON", "200"))   # characters kept per caller line / per agent line / in total
+ROTATE_RECAP_AGENT = int(os.getenv("SIP_ROTATE_RECAP_AGENT", "130"))
+ROTATE_RECAP_MAX = int(os.getenv("SIP_ROTATE_RECAP_MAX", "2400"))
 MANUAL_VAD = os.getenv("SIP_MANUAL_VAD", "0") == "1"   # measured: no saving (the audio context is the speech so far, not silence), so OFF
 VAD_START_FRAMES = int(os.getenv("SIP_VAD_START_FRAMES", "3"))        # 3 x 20 ms of speech opens an utterance
 VAD_END_HANG_MS = int(os.getenv("SIP_VAD_END_HANG_MS", "700"))        # this much trailing silence closes it (activityEnd)
@@ -289,6 +300,12 @@ class CallSession:
         self.turn_audio_bytes = 0
         self._turn_tool = False
         self.last_turn_empty = False    # last agent turn produced no speech and no tool call
+        self._turn_out_audio = 0        # audio-out tokens Gemini billed for the current turn (a turn that was cut by barge-in still spoke)
+        self._ctx_audio = 0             # audio tokens in the current Live session's context (from the last usage message)
+        self.last_turn_done_ts = time.monotonic()
+        self.rotations = 0              # planned session restarts so far
+        self._rotating = False          # a planned restart is in progress (set by the watchdog just before it closes the socket)
+        self._rotated = False           # the current session was opened by a planned restart (uses the text recap prompt)
         self.reconnects = 0             # Gemini session lost mid-call and reopened (Google 1011 'resource exhausted' etc.)
         self._live_dropped = False
         self.callee_hung_up = False
@@ -433,7 +450,20 @@ class CallSession:
         lines = [("Person: " if r == "user" else "Agent: ") + t.strip().replace("\n", " ")[:160] for r, t in self.history[-6:]]
         return "\n".join(lines) or "(nothing yet)"
 
+    def _rotation_recap(self) -> str:
+        """Text version of the whole call so far for a restarted session (cheap text instead of the audio history)."""
+        lines = []
+        for r, t in self.history:
+            t = " ".join(t.split())
+            lines.append(("Person: " if r == "user" else "Agent: ") + t[:ROTATE_RECAP_PERSON if r == "user" else ROTATE_RECAP_AGENT])
+        text = "\n".join(lines)
+        if len(text) > ROTATE_RECAP_MAX:          # keep the beginning (name, first questions) and the end (latest turns)
+            text = text[: ROTATE_RECAP_MAX // 3] + "\n[...]\n" + text[-(ROTATE_RECAP_MAX * 2 // 3):]
+        return text or "(nothing yet)"
+
     def _step1(self, pre: bool = False) -> str:
+        if self._rotated:
+            return STEP1_ROTATE.format(recap=self._rotation_recap())
         if self.reconnects:
             return STEP1_RECONNECT.format(recap=self._recap())
         if not CANNED:
@@ -565,7 +595,7 @@ class CallSession:
                                 if t.exception() and not isinstance(t.exception(), (asyncio.IncompleteReadError, websockets.ConnectionClosed)):
                                     self.log.error("task failed: %r", t.exception())
                     except (websockets.WebSocketException, OSError, asyncio.TimeoutError) as e:
-                        if not self.reconnects:
+                        if not self.reconnects and not self._rotated:
                             raise
                         self.log.warning("reconnect attempt failed: %r", e)
                         self._live_dropped = True
@@ -604,6 +634,18 @@ class CallSession:
         recap and the callee's unanswered audio; after MAX_RECONNECTS failures plays a recorded apology and ends the call."""
         if not self._live_dropped:
             return False
+        if self._rotating:                      # planned restart: no apology, not counted as a failure, nothing the person said is lost
+            self._rotating = False
+            self.rotations += 1
+            self._rotated = True
+            self._ctx_audio = 0
+            self.turn_open, self.turn_audio_bytes, self.gen_open = False, 0, False
+            self._down.reset()
+            self.preroll = collections.deque(self._since_turn)
+            self._since_turn.clear()
+            self.log.info("session restart %d/%d: fresh Live session with a text recap (%d chars) instead of the audio history",
+                          self.rotations, ROTATE_MAX, len(self._rotation_recap()))
+            return True
         if self.reconnects >= MAX_RECONNECTS:
             self.log.error("Gemini session lost %d times: recorded apology and hang-up", self.reconnects)
             self.queue_audio("lineproblem")
@@ -616,6 +658,7 @@ class CallSession:
                     "Follow-up Needed": "Call this person back", "Call Outcome": "technical_problem"}, "session_id": self.cid})
             return False
         self.reconnects += 1
+        self._rotated = False
         self.log.warning("Gemini session lost mid-call: reconnecting (%d/%d), %.1fs of callee audio carried over",
                          self.reconnects, MAX_RECONNECTS, len(self._since_turn) * 0.02)
         self.turn_open, self.turn_audio_bytes, self.gen_open = False, 0, False
@@ -977,6 +1020,8 @@ class CallSession:
                 self.gen_open = False
                 self._usage_evt.set()
                 self.last_tokens = tokens_from_live(usage)
+                self._turn_out_audio += int(self.last_tokens.get("output_audio", 0) or 0)
+                self._ctx_audio = int(self.last_tokens.get("input_audio", 0) or 0)
                 # one usage message arrives per generated turn: each is recorded as its own billed event (text/audio split kept)
                 await run_in_threadpool(record_usage, model=GEMINI_LIVE_MODEL, purpose="live_turn", channel="phone",
                                         session_id=self.cid, call_id=self.info.call_id, raw=usage,
@@ -1026,7 +1071,9 @@ class CallSession:
                         pcm8 = self._down.process(pcm24)
                         self.out_buf.extend(pcm8)
                 if sc.get("turnComplete"):
-                    self.last_turn_empty = self.turn_audio_bytes == 0 and not self._turn_tool and not self.hangup_requested
+                    self.last_turn_empty = (self.turn_audio_bytes == 0 and not self._turn_tool and not self.hangup_requested
+                                            and not (EMPTY_FIX and self._turn_out_audio > 0))
+                    self._turn_out_audio = 0
                     if self.last_turn_empty:
                         self.log.info("agent turn finished with no speech and no tool call")
                     self.closing = bool(GOODBYE_RE.search(self.agent_text))   # agent just said goodbye
@@ -1037,6 +1084,7 @@ class CallSession:
                     self._turn_tool = False
                     self.turn_done.set()
                     self._since_turn.clear()
+                    self.last_turn_done_ts = time.monotonic()
                     if self.underruns:
                         self.log.info("player: %d underrun frame(s) (padded with silence) in the last agent turn", self.underruns)
                         self.underruns = 0
@@ -1196,6 +1244,15 @@ class CallSession:
                         self.turn_done.set()
                         asyncio.create_task(self._graceful_hangup())
                     continue
+                if (ROTATE_TOKENS and CANNED and self._ctx_audio >= ROTATE_TOKENS and self.rotations < ROTATE_MAX
+                        and not self.soft_limit_sent and elapsed < SOFT_LIMIT_S - 15 and not self.gen_open
+                        and self.last_turn_done_ts > self.last_voice_ts            # the agent answered AFTER the person's last words
+                        and now - self.last_turn_done_ts >= ROTATE_QUIET_S and idle >= ROTATE_QUIET_S):
+                    self.log.info("watchdog: audio context is %d tokens (>= %d): restarting the Live session with a text recap",
+                                  self._ctx_audio, ROTATE_TOKENS)
+                    self._rotating = True
+                    await gws.close(code=1000, reason="planned session restart")
+                    await asyncio.sleep(3600)       # the run loop reopens; this task is cancelled
                 if self.last_turn_empty and self.user_spoke and self.empty_retries < 2 and idle >= EMPTY_TURN_RETRY_S:
                     self.empty_retries += 1
                     self.last_turn_empty = False

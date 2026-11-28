@@ -4,6 +4,7 @@ from api.routers.chat import router as chat_router
 from api.routers.documents import router as documents_router
 from api.routers.admin import router as admin_router, public_router as admin_public_router
 from api.routers.billing import router as billing_router
+from api.routers.dialer import router as dialer_router
 from api.auth import require_admin
 from fastapi import Depends
 from api.routers.upload import router as upload_router
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
 	app.include_router(admin_public_router, prefix="/api")
 	app.include_router(admin_router, prefix="/api")
 	app.include_router(billing_router, prefix="/api")
+	app.include_router(dialer_router, prefix="/api")
 	app.include_router(upload_router, prefix="/api")
 	app.include_router(voice_router, prefix="/api")
 	app.include_router(voice_stream_router, prefix="/api")

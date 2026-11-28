@@ -2,8 +2,9 @@
 need a customer-service answer. Saved with the caller's number (calls table + the lead data the admin panel already shows).
 Replaces the live-session tools for notes/saves: a tool call re-bills the whole Live context (about 2x for that turn)."""
 import json
+import os
 import traceback
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -11,12 +12,14 @@ from agent.config import GEMINI_API_KEY, GEMINI_MODEL
 from agent.db import get_connection
 from agent.usage import record_usage, tokens_from_langchain, is_test_session
 
+POST_CALL_MODEL = (os.getenv("POST_CALL_MODEL") or "gemini-3.5-flash-lite").strip()   # compared on 6 real calls 2026-11-28 vs gemini-3.8-flash
+
 OUTCOMES = ("interested", "not_interested", "call_later", "do_not_call", "wrong_number", "answered_questions", "no_response")
 
 
 class Todo(BaseModel):
     action: str                  # what customer service should do, one short line in English
-    priority: str = "normal"     # high | normal | low
+    priority: Literal["high", "normal", "low"] = "normal"
     due: Optional[str] = None    # e.g. "today 17:00" if the caller named a time
 
 
@@ -24,7 +27,7 @@ class CallAnalysis(BaseModel):
     summary_bn: str              # 2-3 short Bengali sentences
     summary_en: str              # the same in English
     outcome: str                 # one of OUTCOMES
-    interest: str                # high | medium | low | none
+    interest: Literal["high", "medium", "low", "none"]   # how keen the caller is to open the DPS
     callee_name: Optional[str] = None
     callback_time: Optional[str] = None
     questions_asked: List[str] = []
@@ -74,11 +77,13 @@ def analyze_call(call_id: str, conversation_id: str, force: bool = False) -> Opt
             return None
 
         from langchain_google_genai import ChatGoogleGenerativeAI
-        llm = ChatGoogleGenerativeAI(model=GEMINI_MODEL, api_key=GEMINI_API_KEY, temperature=0, thinking_budget=0, max_retries=2, timeout=60.0)
+        # flash-lite rejects thinking_budget=0 (400 INVALID_ARGUMENT) and ignores temperature: it uses thinking_level instead
+        kw = {"thinking_level": "minimal"} if "flash-lite" in POST_CALL_MODEL else {"temperature": 0, "thinking_budget": 0}
+        llm = ChatGoogleGenerativeAI(model=POST_CALL_MODEL, api_key=GEMINI_API_KEY, max_retries=2, timeout=60.0, **kw)
         result = llm.with_structured_output(CallAnalysis, include_raw=True).invoke(f"{SYSTEM}\n\nTRANSCRIPT:\n{text}")
         raw, parsed = result.get("raw"), result.get("parsed")
         if raw is not None:
-            record_usage(model=(getattr(raw, "response_metadata", None) or {}).get("model_name") or GEMINI_MODEL, purpose="post_call",
+            record_usage(model=(getattr(raw, "response_metadata", None) or {}).get("model_name") or POST_CALL_MODEL, purpose="post_call",
                          channel="phone", session_id=conversation_id, call_id=call_id, is_test=bool(row["is_test"]) or is_test_session(conversation_id),
                          **tokens_from_langchain(getattr(raw, "usage_metadata", None)))
         if parsed is None:
